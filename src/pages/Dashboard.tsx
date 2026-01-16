@@ -298,11 +298,13 @@ export default function Dashboard() {
                         <DialogTrigger asChild>
                             <Button>+ New Transaction</Button>
                         </DialogTrigger>
-                        <DialogContent className="sm:max-w-[525px]">
-                            <DialogHeader>
+                        <DialogContent className="sm:max-w-[700px] flex flex-col p-0">
+                            <DialogHeader className="px-6 pt-6 pb-4">
                                 <DialogTitle>Add Transaction</DialogTitle>
                             </DialogHeader>
-                            <TradeForm onSuccess={() => setIsTradeModalOpen(false)} />
+                            <div className="overflow-y-auto px-6 h-[500px]">
+                              <TradeForm onSuccess={() => setIsTradeModalOpen(false)} />
+                            </div>
                         </DialogContent>
                     </Dialog>
                 </div>
@@ -338,13 +340,13 @@ export default function Dashboard() {
                             <>
                                 <div className={cn(
                                     "text-2xl font-bold",
-                                    totals.totalUnrealizedPnL >= 0 ? "text-green-600" : "text-red-500"
+                                    totals.totalUnrealizedPnL >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"
                                 )}>
                                     {totals.totalUnrealizedPnL > 0 ? '+' : ''}{formatCurrency(totals.totalUnrealizedPnL)}
                                 </div>
                                 <p className={cn(
                                     "text-xs mt-1",
-                                    totals.totalPnLPercent >= 0 ? "text-green-600" : "text-red-500"
+                                    totals.totalPnLPercent >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"
                                 )}>
                                      {totals.totalPnLPercent > 0 ? '+' : ''}{totals.totalPnLPercent.toFixed(2)}%
                                 </p>
@@ -440,12 +442,12 @@ export default function Dashboard() {
                                                     </Button>
                                                 </div>
                                                 {isManualPrice && (
-                                                    <span className="text-[10px] uppercase tracking-wide text-amber-600">Manual</span>
+                                                    <span className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">Manual</span>
                                                 )}
                                             </div>
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            <div className={cn("flex flex-col items-end", lastBuyDiff >= 0 ? "text-green-600" : "text-red-500")}>
+                                            <div className={cn("flex flex-col items-end", lastBuyDiff >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
                                                 <span className="text-xs font-semibold">{lastBuyDiff > 0 ? '+' : ''}{lastBuyDiff.toFixed(2)}%</span>
                                                 <span className="text-[10px] text-muted-foreground">({formatCurrency(h.lastBuyPrice)})</span>
                                             </div>
@@ -453,7 +455,7 @@ export default function Dashboard() {
                                         <TableCell className="text-right text-muted-foreground">{formatCurrency(h.avgBuyPrice)}</TableCell>
                                         <TableCell className="text-right">{formatCurrency(value)}</TableCell>
                                         <TableCell className="text-right">
-                                            <div className={cn("flex flex-col items-end", pnl >= 0 ? "text-green-600" : "text-red-500")}>
+                                            <div className={cn("flex flex-col items-end", pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
                                                  <span>{pnl > 0 ? '+' : ''}{formatCurrency(pnl)}</span>
                                                  <span className="text-xs">{pnlPercent.toFixed(2)}%</span>
                                             </div>
@@ -462,7 +464,7 @@ export default function Dashboard() {
                                             <div className="flex flex-col items-end">
                                                 <span>{actualPct.toFixed(1)}% <span className="text-muted-foreground text-xs">/ {targetPct}%</span></span>
                                                 {targetPct > 0 && (
-                                                    <span className={cn("text-xs", diff > 0 ? "text-green-500" : "text-red-500")}>
+                                                    <span className={cn("text-xs", diff > 0 ? "text-green-500 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
                                                         {diff > 0 ? '+' : ''}{diff.toFixed(1)}%
                                                     </span>
                                                 )}

@@ -82,7 +82,7 @@ export default function TransactionsPage() {
     return (
       <div className="flex flex-col gap-1">
         {outgoing.map(e => (
-          <span key={e.id} className="text-red-500">
+          <span key={e.id} className="text-red-500 dark:text-red-400">
             Sent: {Math.abs(e.amount)} <strong>{e.assetTicker}</strong>
             {e.accountId && accounts[e.accountId] && (
               <span className="text-xs text-muted-foreground ml-1">({accounts[e.accountId]})</span>
@@ -90,7 +90,7 @@ export default function TransactionsPage() {
           </span>
         ))}
         {incoming.map(e => (
-          <span key={e.id} className="text-green-600">
+          <span key={e.id} className="text-green-600 dark:text-green-400">
             Received: {Math.abs(e.amount)} <strong>{e.assetTicker}</strong>
             {e.accountId && accounts[e.accountId] && (
               <span className="text-xs text-muted-foreground ml-1">({accounts[e.accountId]})</span>
@@ -122,12 +122,14 @@ export default function TransactionsPage() {
               <Plus className="mr-2 h-4 w-4" /> Add Transaction
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
+          <DialogContent className="sm:max-w-[700px] flex flex-col p-0">
+            <DialogHeader className="px-6 pt-6 pb-4">
               <DialogTitle>Add Transaction</DialogTitle>
             </DialogHeader>
-            {/* Pass generic onSuccess to close and refresh */}
-            <TradeForm onSuccess={handleSuccess} />
+            <div className="overflow-y-auto px-6 h-[500px]">
+              {/* Pass generic onSuccess to close and refresh */}
+              <TradeForm onSuccess={handleSuccess} />
+            </div>
           </DialogContent>
         </Dialog>
       </div>

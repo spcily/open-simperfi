@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { db, Account } from "@/lib/db";
@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AssetCombobox } from "@/components/ui/asset-combobox";
+import { cn } from "@/lib/utils";
 
 const tradeSchema = z.object({
   type: z.enum(["trade", "deposit", "withdraw", "transfer"]),
@@ -82,9 +84,16 @@ const getLocalDateTimeInputValue = () => {
 
 export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
   const [accounts, setAccounts] = React.useState<Account[]>([]);
+  const [availableAssets, setAvailableAssets] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     db.accounts.toArray().then(setAccounts);
+    
+    // Fetch unique asset tickers from ledger entries
+    db.ledger.toArray().then((entries) => {
+      const uniqueTickers = [...new Set(entries.map(e => e.assetTicker))].sort();
+      setAvailableAssets(uniqueTickers);
+    });
   }, []);
 
   const form = useForm<TradeFormValues>({
@@ -294,11 +303,11 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
   const buyPriceHelperText = React.useMemo(() => {
     const priceFieldVisible = transactionType === 'trade' || transactionType === 'deposit';
     if (!priceFieldVisible) return null;
-    if (!normalizedAssetInTicker) return 'Enter a ticker to auto-fill the live price.';
-    if (inAutoPriceStatus === 'loading') return `Fetching ${normalizedAssetInTicker} price...`;
-    if (inAutoPriceStatus === 'error') return 'Live price unavailable right now. Enter your own value.';
+    if (!normalizedAssetInTicker) return 'Enter ticker to auto-fill';
+    if (inAutoPriceStatus === 'loading') return `Fetching ${normalizedAssetInTicker}...`;
+    if (inAutoPriceStatus === 'error') return 'Price unavailable';
     if (inAutoPriceStatus === 'success' && inAutoPriceTicker) {
-      return `Fetched live price for ${inAutoPriceTicker}. Adjust if needed.`;
+      return 'Adjust if needed';
     }
     return null;
   }, [transactionType, normalizedAssetInTicker, inAutoPriceStatus, inAutoPriceTicker]);
@@ -306,11 +315,11 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
   const sellPriceHelperText = React.useMemo(() => {
     const priceFieldVisible = transactionType === 'trade' || transactionType === 'withdraw';
     if (!priceFieldVisible) return null;
-    if (!normalizedAssetOutTicker) return 'Enter a ticker to auto-fill the live price.';
-    if (outAutoPriceStatus === 'loading') return `Fetching ${normalizedAssetOutTicker} price...`;
-    if (outAutoPriceStatus === 'error') return 'Live price unavailable right now. Enter your own value.';
+    if (!normalizedAssetOutTicker) return 'Enter ticker to auto-fill';
+    if (outAutoPriceStatus === 'loading') return `Fetching ${normalizedAssetOutTicker}...`;
+    if (outAutoPriceStatus === 'error') return 'Price unavailable';
     if (outAutoPriceStatus === 'success' && outAutoPriceTicker) {
-      return `Fetched live price for ${outAutoPriceTicker}. Adjust if needed.`;
+      return 'Adjust if needed';
     }
     return null;
   }, [transactionType, normalizedAssetOutTicker, outAutoPriceStatus, outAutoPriceTicker]);
@@ -419,23 +428,40 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+    <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col">
+      <div className="space-y-4">
         <div>
-            <Label>Date & Time</Label>
-            <Input type="datetime-local" step="60" {...form.register("date")} />
+          <Label>Date & Time</Label>
+          <Input type="datetime-local" step="60" {...form.register("date")} />
         </div>
-        <div>
-          <Label>Type</Label>
-          <select 
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            {...form.register("type")}
-          >
-            <option value="trade">Trade (Swap)</option>
-            <option value="deposit">Deposit (In)</option>
-            <option value="withdraw">Withdraw (Out)</option>
-            <option value="transfer">Transfer</option>
-          </select>
+
+      <div>
+        <Label>Type</Label>
+        <div className="flex flex-wrap gap-2 mt-2">
+          {[
+            { value: 'trade', label: 'Trade' },
+            { value: 'deposit', label: 'Deposit' },
+            { value: 'withdraw', label: 'Withdraw' },
+            { value: 'transfer', label: 'Transfer' },
+          ].map((option) => (
+            <label
+              key={option.value}
+              className={cn(
+                "inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium cursor-pointer transition-colors",
+                transactionType === option.value
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background hover:bg-accent hover:text-accent-foreground border-input"
+              )}
+            >
+              <input
+                type="radio"
+                value={option.value}
+                {...form.register("type")}
+                className="sr-only"
+              />
+              {option.label}
+            </label>
+          ))}
         </div>
       </div>
 
@@ -443,50 +469,85 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
          <Label>
            {transactionType === 'transfer' ? 'From Account (Source)' : 'Account'}
          </Label>
-         <select 
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            {...form.register("accountId")}
-         >
-           <option value="" disabled>Select Account</option>
-           {accounts.map((account) =>
-             account.id ? (
-               <option key={account.id} value={account.id.toString()}>
-                 {account.name}
-               </option>
-             ) : null
+         <div className="flex flex-wrap gap-2 mt-2">
+           {accounts.length === 0 ? (
+             <p className="text-sm text-muted-foreground">No accounts available</p>
+           ) : (
+             accounts.map((account) =>
+               account.id ? (
+                 <label
+                   key={account.id}
+                   className={cn(
+                     "inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium cursor-pointer transition-colors",
+                     form.watch("accountId") === account.id.toString()
+                       ? "bg-primary text-primary-foreground border-primary"
+                       : "bg-background hover:bg-accent hover:text-accent-foreground border-input"
+                   )}
+                 >
+                   <input
+                     type="radio"
+                     value={account.id.toString()}
+                     {...form.register("accountId")}
+                     className="sr-only"
+                   />
+                   {account.name}
+                 </label>
+               ) : null
+             )
            )}
-         </select>
+         </div>
          {form.formState.errors.accountId && <p className="text-red-500 text-sm">{form.formState.errors.accountId.message}</p>}
       </div>
 
       {transactionType === 'transfer' && (
           <div className="space-y-2">
             <Label>To Account (Destination)</Label>
-            <select 
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                {...form.register("toAccountId")}
-            >
-            <option value="" disabled>Select Destination Account</option>
-            {accounts.map((account) =>
-              account.id ? (
-                <option key={account.id} value={account.id.toString()}>
-                  {account.name}
-                </option>
-              ) : null
-            )}
-            </select>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {accounts.map((account) =>
+                account.id ? (
+                  <label
+                    key={account.id}
+                    className={cn(
+                      "inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium cursor-pointer transition-colors",
+                      form.watch("toAccountId") === account.id.toString()
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background hover:bg-accent hover:text-accent-foreground border-input"
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      value={account.id.toString()}
+                      {...form.register("toAccountId")}
+                      className="sr-only"
+                    />
+                    {account.name}
+                  </label>
+                ) : null
+              )}
+            </div>
             {form.formState.errors.toAccountId && <p className="text-red-500 text-sm">{form.formState.errors.toAccountId.message}</p>}
           </div>
       )}
 
       {/* Outgoing Section: Show for Trade & Withdraw (But NOT Transfer) */}
       {(transactionType === 'trade' || transactionType === 'withdraw') && (
-        <div className="border p-4 rounded-md bg-red-50/50">
-          <Label className="text-red-600 font-semibold mb-2 block">Outgoing (Sell/Send)</Label>
+        <div className="border p-4 rounded-md bg-red-50/50 dark:bg-red-950/30">
+          <Label className="text-red-600 dark:text-red-400 font-semibold mb-2 block">Outgoing (Sell/Send)</Label>
           <div className="grid grid-cols-3 gap-2">
             <div>
                <Label>Asset Symbol</Label>
-               <Input placeholder="USDT, BTC" {...form.register("assetOutTicker")} />
+               <Controller
+                 name="assetOutTicker"
+                 control={form.control}
+                 render={({ field }) => (
+                   <AssetCombobox
+                     value={field.value || ""}
+                     onValueChange={field.onChange}
+                     assets={availableAssets}
+                     placeholder="Select or type..."
+                   />
+                 )}
+               />
             </div>
             <div>
                <Label>Amount</Label>
@@ -517,9 +578,11 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
                   },
                 })}
               />
-              {sellPriceHelperText && (
-                <p className="text-xs text-muted-foreground mt-1">{sellPriceHelperText}</p>
-              )}
+              <div className="h-5 mt-1">
+                {sellPriceHelperText && (
+                  <p className="text-xs text-muted-foreground">{sellPriceHelperText}</p>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -527,12 +590,23 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
 
       {/* Incoming Section: Show for Trade & Deposit */}
       {(transactionType === 'trade' || transactionType === 'deposit') && (
-        <div className="border p-4 rounded-md bg-green-50/50">
-          <Label className="text-green-600 font-semibold mb-2 block">Incoming (Buy/Receive)</Label>
+        <div className="border p-4 rounded-md bg-green-50/50 dark:bg-green-950/30">
+          <Label className="text-green-600 dark:text-green-400 font-semibold mb-2 block">Incoming (Buy/Receive)</Label>
           <div className="grid grid-cols-3 gap-2">
             <div className="col-span-1">
                <Label>Asset Symbol</Label>
-               <Input placeholder="BTC, ETH" {...form.register("assetInTicker")} />
+               <Controller
+                 name="assetInTicker"
+                 control={form.control}
+                 render={({ field }) => (
+                   <AssetCombobox
+                     value={field.value || ""}
+                     onValueChange={field.onChange}
+                     assets={availableAssets}
+                     placeholder="Select or type..."
+                   />
+                 )}
+               />
             </div>
             <div className="col-span-1">
                <Label>Amount</Label>
@@ -563,10 +637,12 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
                      };
                    },
                  })}
-               />
-               {buyPriceHelperText && (
-                 <p className="text-xs text-muted-foreground mt-1">{buyPriceHelperText}</p>
-               )}
+                />
+                <div className="h-5 mt-1">
+                  {buyPriceHelperText && (
+                    <p className="text-xs text-muted-foreground">{buyPriceHelperText}</p>
+                  )}
+                </div>
             </div>
           </div>
         </div>
@@ -574,13 +650,24 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
 
       {/* Transfer Section: Reusing Incoming fields logic visually? No, lets make a clean one */}
       {transactionType === 'transfer' && (
-         <div className="border p-4 rounded-md bg-blue-50/50">
-         <Label className="text-blue-600 font-semibold mb-2 block">Asset to Transfer</Label>
+         <div className="border p-4 rounded-md bg-blue-50/50 dark:bg-blue-950/30">
+         <Label className="text-blue-600 dark:text-blue-400 font-semibold mb-2 block">Asset to Transfer</Label>
          <div className="grid grid-cols-2 gap-2">
-           <div>
-              <Label>Asset Symbol</Label>
-              <Input placeholder="BTC" {...form.register("assetInTicker")} />
-           </div>
+            <div>
+               <Label>Asset Symbol</Label>
+               <Controller
+                 name="assetInTicker"
+                 control={form.control}
+                 render={({ field }) => (
+                   <AssetCombobox
+                     value={field.value || ""}
+                     onValueChange={field.onChange}
+                     assets={availableAssets}
+                     placeholder="Select or type..."
+                   />
+                 )}
+               />
+            </div>
            <div>
               <Label>Amount</Label>
               <Input type="number" step="any" placeholder="0.00" {...form.register("assetInAmount")} />
@@ -593,8 +680,11 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
         <Label>Notes</Label>
         <Textarea {...form.register("notes")} />
       </div>
-
+    </div>
+      
+    <div className="sticky bottom-0 bg-background px-6 py-4 border-t -mx-6">
       <Button type="submit" className="w-full">Save Transaction</Button>
+    </div>
     </form>
   );
 }
