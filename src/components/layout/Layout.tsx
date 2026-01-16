@@ -2,7 +2,8 @@ import { SidebarContent } from './Sidebar'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Menu, User } from 'lucide-react'
-import { Outlet } from "react-router-dom";
+import { Outlet } from "react-router-dom"
+import { ThemeToggle } from '@/components/theme-toggle'
 
 export default function Layout() {
   return (
@@ -32,6 +33,7 @@ export default function Layout() {
           <div className="font-semibold text-lg">Dashboard</div> 
           
           <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle />
             <Button variant="ghost" size="icon" className="rounded-full">
                 <User className="h-5 w-5" />
             </Button>
