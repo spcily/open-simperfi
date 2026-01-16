@@ -279,14 +279,14 @@ export default function Dashboard() {
 
     return (
         <div className="container mx-auto p-4 space-y-6">
-            <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold tracking-tight">OpenSimperfi Portfolio</h1>
-                <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">OpenSimperfi Portfolio</h1>
+                <div className="flex gap-2 flex-wrap">
                     <Dialog open={isAllocationModalOpen} onOpenChange={setIsAllocationModalOpen}>
                         <DialogTrigger asChild>
-                            <Button variant="outline">Manage Strategy</Button>
+                            <Button variant="outline" className="flex-1 sm:flex-none">Manage Strategy</Button>
                         </DialogTrigger>
-                        <DialogContent className="sm:max-w-[425px]">
+                        <DialogContent className="sm:max-w-[425px] max-w-[95vw]">
                             <DialogHeader>
                                 <DialogTitle>Portfolio Targets</DialogTitle>
                             </DialogHeader>
@@ -296,13 +296,13 @@ export default function Dashboard() {
 
                     <Dialog open={isTradeModalOpen} onOpenChange={setIsTradeModalOpen}>
                         <DialogTrigger asChild>
-                            <Button>+ New Transaction</Button>
+                            <Button className="flex-1 sm:flex-none">+ New Transaction</Button>
                         </DialogTrigger>
-                        <DialogContent className="sm:max-w-[700px] flex flex-col p-0">
-                            <DialogHeader className="px-6 pt-6 pb-4">
+                        <DialogContent className="sm:max-w-[700px] max-w-[95vw] flex flex-col p-0">
+                            <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4">
                                 <DialogTitle>Add Transaction</DialogTitle>
                             </DialogHeader>
-                            <div className="overflow-y-auto px-6 h-[500px]">
+                            <div className="overflow-y-auto px-4 sm:px-6 h-[60vh] sm:h-[500px]">
                               <TradeForm onSuccess={() => setIsTradeModalOpen(false)} />
                             </div>
                         </DialogContent>
@@ -367,49 +367,132 @@ export default function Dashboard() {
                 </CardHeader>
                 <CardContent>
                     {!hasSnapshot ? (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Asset</TableHead>
-                                    <TableHead className="text-right">Balance</TableHead>
-                                    <TableHead className="text-right">Price</TableHead>
-                                    <TableHead className="text-right">vs Last Buy</TableHead>
-                                    <TableHead className="text-right">Avg Buy</TableHead>
-                                    <TableHead className="text-right">Value</TableHead>
-                                    <TableHead className="text-right">Unrealized PnL</TableHead>
-                                    <TableHead className="text-right">Allocation (Actual / Target)</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {[1, 2, 3].map((i) => (
-                                    <TableRow key={i}>
-                                        <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                                        <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
-                                        <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
-                                        <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
-                                        <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
-                                        <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
-                                        <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
-                                        <TableCell className="text-right"><Skeleton className="h-4 w-24 ml-auto" /></TableCell>
+                        <>
+                            {/* Desktop Table */}
+                            <Table className="hidden md:table">
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Asset</TableHead>
+                                        <TableHead className="text-right">Balance</TableHead>
+                                        <TableHead className="text-right">Price</TableHead>
+                                        <TableHead className="text-right">vs Last Buy</TableHead>
+                                        <TableHead className="text-right">Avg Buy</TableHead>
+                                        <TableHead className="text-right">Value</TableHead>
+                                        <TableHead className="text-right">Unrealized PnL</TableHead>
+                                        <TableHead className="text-right">Allocation (Actual / Target)</TableHead>
                                     </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {[1, 2, 3].map((i) => (
+                                        <TableRow key={i}>
+                                            <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-24 ml-auto" /></TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                            {/* Mobile Cards */}
+                            <div className="md:hidden space-y-3">
+                                {[1, 2, 3].map((i) => (
+                                    <div key={i} className="border rounded-lg p-4 space-y-2">
+                                        <Skeleton className="h-5 w-20" />
+                                        <Skeleton className="h-4 w-full" />
+                                        <Skeleton className="h-4 w-full" />
+                                        <Skeleton className="h-4 w-3/4" />
+                                    </div>
                                 ))}
-                            </TableBody>
-                        </Table>
+                            </div>
+                        </>
                     ) : (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Asset</TableHead>
-                                    <TableHead className="text-right">Balance</TableHead>
-                                    <TableHead className="text-right">Price</TableHead>
-                                    <TableHead className="text-right">vs Last Buy</TableHead>
-                                    <TableHead className="text-right">Avg Buy</TableHead>
-                                    <TableHead className="text-right">Value</TableHead>
-                                    <TableHead className="text-right">Unrealized PnL</TableHead>
-                                    <TableHead className="text-right">Allocation (Actual / Target)</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
+                        <>
+                            {/* Desktop Table */}
+                            <Table className="hidden md:table">
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Asset</TableHead>
+                                        <TableHead className="text-right">Balance</TableHead>
+                                        <TableHead className="text-right">Price</TableHead>
+                                        <TableHead className="text-right">vs Last Buy</TableHead>
+                                        <TableHead className="text-right">Avg Buy</TableHead>
+                                        <TableHead className="text-right">Value</TableHead>
+                                        <TableHead className="text-right">Unrealized PnL</TableHead>
+                                        <TableHead className="text-right">Allocation (Actual / Target)</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {displayedHoldings.map((h) => {
+                                        const price = priceFor(h.ticker);
+                                        const isManualPrice = customPrices[h.ticker] !== undefined;
+                                        const value = h.amount * price;
+                                        const actualPct = totals.totalValue > 0 ? (value / totals.totalValue) * 100 : 0;
+                                        const targetPct = targetMap.get(h.ticker) || 0;
+                                        const diff = actualPct - targetPct;
+
+                                        const pnl = value - h.totalCostBasis;
+                                        const pnlPercent = h.totalCostBasis > 0 ? (pnl / h.totalCostBasis) * 100 : 0;
+                                        const lastBuyDiff = h.lastBuyPrice > 0 ? ((price - h.lastBuyPrice) / h.lastBuyPrice) * 100 : 0;
+
+                                    return (
+                                        <TableRow key={h.ticker}>
+                                            <TableCell className="font-medium">{h.ticker}</TableCell>
+                                            <TableCell className="text-right">{formatCrypto(h.amount)}</TableCell>
+                                            <TableCell className="text-right">
+                                                <div className="flex flex-col items-end gap-1">
+                                                    <div className="flex items-center gap-1">
+                                                        <span>{formatCurrency(price)}</span>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                                            onClick={() => openPriceDialog(h.ticker)}
+                                                        >
+                                                            <Pencil className="h-3.5 w-3.5" />
+                                                            <span className="sr-only">{isManualPrice ? 'Edit manual price' : 'Set manual price'}</span>
+                                                        </Button>
+                                                    </div>
+                                                    {isManualPrice && (
+                                                        <span className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">Manual</span>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <div className={cn("flex flex-col items-end", lastBuyDiff >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
+                                                    <span className="text-xs font-semibold">{lastBuyDiff > 0 ? '+' : ''}{lastBuyDiff.toFixed(2)}%</span>
+                                                    <span className="text-[10px] text-muted-foreground">({formatCurrency(h.lastBuyPrice)})</span>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-right text-muted-foreground">{formatCurrency(h.avgBuyPrice)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(value)}</TableCell>
+                                            <TableCell className="text-right">
+                                                <div className={cn("flex flex-col items-end", pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
+                                                     <span>{pnl > 0 ? '+' : ''}{formatCurrency(pnl)}</span>
+                                                     <span className="text-xs">{pnlPercent.toFixed(2)}%</span>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <div className="flex flex-col items-end">
+                                                    <span>{actualPct.toFixed(1)}% <span className="text-muted-foreground text-xs">/ {targetPct}%</span></span>
+                                                    {targetPct > 0 && (
+                                                        <span className={cn("text-xs", diff > 0 ? "text-green-500 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
+                                                            {diff > 0 ? '+' : ''}{diff.toFixed(1)}%
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    );
+                                })}
+                                </TableBody>
+                            </Table>
+                            {/* Mobile Cards */}
+                            <div className="md:hidden space-y-3">
                                 {displayedHoldings.map((h) => {
                                     const price = priceFor(h.ticker);
                                     const isManualPrice = customPrices[h.ticker] !== undefined;
@@ -420,61 +503,63 @@ export default function Dashboard() {
 
                                     const pnl = value - h.totalCostBasis;
                                     const pnlPercent = h.totalCostBasis > 0 ? (pnl / h.totalCostBasis) * 100 : 0;
-                                    const lastBuyDiff = h.lastBuyPrice > 0 ? ((price - h.lastBuyPrice) / h.lastBuyPrice) * 100 : 0;
 
-                                return (
-                                    <TableRow key={h.ticker}>
-                                        <TableCell className="font-medium">{h.ticker}</TableCell>
-                                        <TableCell className="text-right">{formatCrypto(h.amount)}</TableCell>
-                                        <TableCell className="text-right">
-                                            <div className="flex flex-col items-end gap-1">
-                                                <div className="flex items-center gap-1">
-                                                    <span>{formatCurrency(price)}</span>
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                                                        onClick={() => openPriceDialog(h.ticker)}
-                                                    >
-                                                        <Pencil className="h-3.5 w-3.5" />
-                                                        <span className="sr-only">{isManualPrice ? 'Edit manual price' : 'Set manual price'}</span>
-                                                    </Button>
+                                    return (
+                                        <div key={h.ticker} className="border rounded-lg p-4 space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <h3 className="text-lg font-bold">{h.ticker}</h3>
+                                                <div className="text-right">
+                                                    <div className="text-sm font-medium">{formatCurrency(value)}</div>
+                                                    <div className="text-xs text-muted-foreground">{actualPct.toFixed(1)}%</div>
                                                 </div>
-                                                {isManualPrice && (
-                                                    <span className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">Manual</span>
-                                                )}
                                             </div>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <div className={cn("flex flex-col items-end", lastBuyDiff >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
-                                                <span className="text-xs font-semibold">{lastBuyDiff > 0 ? '+' : ''}{lastBuyDiff.toFixed(2)}%</span>
-                                                <span className="text-[10px] text-muted-foreground">({formatCurrency(h.lastBuyPrice)})</span>
+                                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                                <div>
+                                                    <div className="text-muted-foreground text-xs mb-1">Balance</div>
+                                                    <div className="font-medium">{formatCrypto(h.amount)}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-muted-foreground text-xs mb-1">Price</div>
+                                                    <div className="flex items-center gap-1 justify-end">
+                                                        <span className="font-medium">{formatCurrency(price)}</span>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-5 w-5 p-0 text-muted-foreground"
+                                                            onClick={() => openPriceDialog(h.ticker)}
+                                                        >
+                                                            <Pencil className="h-3 w-3" />
+                                                        </Button>
+                                                    </div>
+                                                    {isManualPrice && (
+                                                        <div className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400 text-right">Manual</div>
+                                                    )}
+                                                </div>
+                                                <div>
+                                                    <div className="text-muted-foreground text-xs mb-1">Unrealized PnL</div>
+                                                    <div className={cn("font-medium", pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
+                                                        {pnl > 0 ? '+' : ''}{formatCurrency(pnl)}
+                                                        <span className="text-xs ml-1">({pnlPercent.toFixed(2)}%)</span>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-muted-foreground text-xs mb-1">Target Allocation</div>
+                                                    <div className="text-right">
+                                                        <span className="font-medium">{targetPct}%</span>
+                                                        {targetPct > 0 && (
+                                                            <span className={cn("text-xs ml-1", diff > 0 ? "text-green-500 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
+                                                                ({diff > 0 ? '+' : ''}{diff.toFixed(1)}%)
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </TableCell>
-                                        <TableCell className="text-right text-muted-foreground">{formatCurrency(h.avgBuyPrice)}</TableCell>
-                                        <TableCell className="text-right">{formatCurrency(value)}</TableCell>
-                                        <TableCell className="text-right">
-                                            <div className={cn("flex flex-col items-end", pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
-                                                 <span>{pnl > 0 ? '+' : ''}{formatCurrency(pnl)}</span>
-                                                 <span className="text-xs">{pnlPercent.toFixed(2)}%</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <div className="flex flex-col items-end">
-                                                <span>{actualPct.toFixed(1)}% <span className="text-muted-foreground text-xs">/ {targetPct}%</span></span>
-                                                {targetPct > 0 && (
-                                                    <span className={cn("text-xs", diff > 0 ? "text-green-500 dark:text-green-400" : "text-red-500 dark:text-red-400")}>
-                                                        {diff > 0 ? '+' : ''}{diff.toFixed(1)}%
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </TableCell>
-                                    </TableRow>
-                                );
-                            })}
-                        </TableBody>
-                    </Table>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </>
                     )}
                 </CardContent>
             </Card>

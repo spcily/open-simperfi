@@ -54,8 +54,8 @@ export default function AccountsPage() {
 
     return (
         <div className="container mx-auto space-y-6">
-             <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold tracking-tight">Accounts</h1>
+             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Accounts</h1>
                 <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
                     <DialogTrigger asChild>
                         <Button>+ Add Account</Button>
@@ -74,7 +74,8 @@ export default function AccountsPage() {
                     <CardTitle>Your Accounts</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <Table>
+                    {/* Desktop Table */}
+                    <Table className="hidden md:table">
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Name</TableHead>
@@ -121,6 +122,46 @@ export default function AccountsPage() {
                             )}
                         </TableBody>
                     </Table>
+                    {/* Mobile Cards */}
+                    <div className="md:hidden space-y-3">
+                        {accounts?.map((account) => (
+                            <div key={account.id} className="border rounded-lg p-4 space-y-3">
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1">
+                                        <h3 className="font-bold text-base">{account.name}</h3>
+                                        <p className="text-sm text-muted-foreground mt-1">{getAccountTypeLabel(account.type)}</p>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <Dialog open={editingAccount?.id === account.id} onOpenChange={(open) => !open && setEditingAccount(null)}>
+                                            <DialogTrigger asChild>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingAccount(account)}>
+                                                    <Pencil className="h-4 w-4" />
+                                                </Button>
+                                            </DialogTrigger>
+                                            <DialogContent>
+                                                <DialogHeader>
+                                                    <DialogTitle>Edit Account</DialogTitle>
+                                                </DialogHeader>
+                                                <AccountForm initialData={account} onSuccess={() => setEditingAccount(null)} />
+                                            </DialogContent>
+                                        </Dialog>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600" onClick={() => onDelete(account.id!)}>
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-muted-foreground mb-1">Estimated Balance</div>
+                                    <div className="text-sm font-medium">{accountBalances.get(account.id!)}</div>
+                                </div>
+                            </div>
+                        ))}
+                        {accounts?.length === 0 && (
+                            <div className="text-center py-8 text-muted-foreground">
+                                No accounts found. Create one to get started.
+                            </div>
+                        )}
+                    </div>
                 </CardContent>
             </Card>
         </div>

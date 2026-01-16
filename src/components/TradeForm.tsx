@@ -531,9 +531,9 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
 
       {/* Outgoing Section: Show for Trade & Withdraw (But NOT Transfer) */}
       {(transactionType === 'trade' || transactionType === 'withdraw') && (
-        <div className="border p-4 rounded-md bg-red-50/50 dark:bg-red-950/30">
+        <div className="border p-3 sm:p-4 rounded-md bg-red-50/50 dark:bg-red-950/30">
           <Label className="text-red-600 dark:text-red-400 font-semibold mb-2 block">Outgoing (Sell/Send)</Label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
                <Label>Asset Symbol</Label>
                <Controller
@@ -590,10 +590,10 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
 
       {/* Incoming Section: Show for Trade & Deposit */}
       {(transactionType === 'trade' || transactionType === 'deposit') && (
-        <div className="border p-4 rounded-md bg-green-50/50 dark:bg-green-950/30">
+        <div className="border p-3 sm:p-4 rounded-md bg-green-50/50 dark:bg-green-950/30">
           <Label className="text-green-600 dark:text-green-400 font-semibold mb-2 block">Incoming (Buy/Receive)</Label>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="col-span-1">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
                <Label>Asset Symbol</Label>
                <Controller
                  name="assetInTicker"
@@ -608,7 +608,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
                  )}
                />
             </div>
-            <div className="col-span-1">
+            <div>
                <Label>Amount</Label>
                <Input
                  type="number"
@@ -621,7 +621,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
                  })}
                />
             </div>
-            <div className="col-span-1">
+            <div>
                <Label>Price per Unit (USD)</Label>
                <Input
                  type="number"
@@ -650,9 +650,9 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
 
       {/* Transfer Section: Reusing Incoming fields logic visually? No, lets make a clean one */}
       {transactionType === 'transfer' && (
-         <div className="border p-4 rounded-md bg-blue-50/50 dark:bg-blue-950/30">
+         <div className="border p-3 sm:p-4 rounded-md bg-blue-50/50 dark:bg-blue-950/30">
          <Label className="text-blue-600 dark:text-blue-400 font-semibold mb-2 block">Asset to Transfer</Label>
-         <div className="grid grid-cols-2 gap-2">
+         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
                <Label>Asset Symbol</Label>
                <Controller
@@ -682,7 +682,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
       </div>
     </div>
       
-    <div className="sticky bottom-0 bg-background px-6 py-4 border-t -mx-6">
+    <div className="sticky bottom-0 bg-background px-4 sm:px-6 py-4 border-t -mx-4 sm:-mx-6">
       <Button type="submit" className="w-full">Save Transaction</Button>
     </div>
     </form>

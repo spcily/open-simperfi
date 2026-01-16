@@ -113,8 +113,8 @@ export default function TransactionsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Transactions</h1>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+        <h1 className="text-2xl sm:text-3xl font-bold">Transactions</h1>
         
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
@@ -142,46 +142,82 @@ export default function TransactionsPage() {
             {trades.length === 0 ? (
                 <div className="text-center py-6 text-muted-foreground">No transactions found.</div>
             ) : (
-                <Table>
-                <TableHeader>
-                    <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Details</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {trades.map((trade) => (
-                    <TableRow key={trade.id}>
-                        <TableCell>
-                            {trade.date.toLocaleDateString()} 
-                            <span className="text-xs text-muted-foreground block">
-                                {trade.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                            </span>
-                        </TableCell>
-                        <TableCell>
-                            <Badge variant={getBadgeVariant(trade.type)} className="capitalize">
-                                {trade.type}
-                            </Badge>
-                        </TableCell>
-                        <TableCell>
-                            {renderDescription(trade)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                        <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8 text-destructive"
-                            onClick={() => handleDelete(trade.id!)}
-                        >
-                            <Trash2 className="h-4 w-4" />
-                        </Button>
-                        </TableCell>
-                    </TableRow>
-                    ))}
-                </TableBody>
-                </Table>
+                <>
+                    {/* Desktop Table */}
+                    <Table className="hidden md:table">
+                    <TableHeader>
+                        <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Details</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {trades.map((trade) => (
+                        <TableRow key={trade.id}>
+                            <TableCell>
+                                {trade.date.toLocaleDateString()} 
+                                <span className="text-xs text-muted-foreground block">
+                                    {trade.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </span>
+                            </TableCell>
+                            <TableCell>
+                                <Badge variant={getBadgeVariant(trade.type)} className="capitalize">
+                                    {trade.type}
+                                </Badge>
+                            </TableCell>
+                            <TableCell>
+                                {renderDescription(trade)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8 text-destructive"
+                                onClick={() => handleDelete(trade.id!)}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                            </TableCell>
+                        </TableRow>
+                        ))}
+                    </TableBody>
+                    </Table>
+                    {/* Mobile Cards */}
+                    <div className="md:hidden space-y-3">
+                        {trades.map((trade) => (
+                            <div key={trade.id} className="border rounded-lg p-4 space-y-3">
+                                <div className="flex items-start justify-between gap-2">
+                                    <div>
+                                        <div className="font-medium text-sm">
+                                            {trade.date.toLocaleDateString()}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                            {trade.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <Badge variant={getBadgeVariant(trade.type)} className="capitalize">
+                                            {trade.type}
+                                        </Badge>
+                                        <Button 
+                                            variant="ghost" 
+                                            size="icon" 
+                                            className="h-8 w-8 text-destructive"
+                                            onClick={() => handleDelete(trade.id!)}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                                <div>
+                                    {renderDescription(trade)}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </>
             )}
         </CardContent>
       </Card>
