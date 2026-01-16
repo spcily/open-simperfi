@@ -2,7 +2,7 @@ import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { db } from "@/lib/db";
+import { db, Account } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,29 +23,29 @@ const tradeSchema = z.object({
   assetInAmount: z.string().optional(),
   assetInUsdPrice: z.string().optional(), // Price per unit in USD at time of transaction
   
-  // Source / Main Wallet
-  walletId: z.string().min(1, "Wallet is required"),
+    // Source / Main Account
+    accountId: z.string().min(1, "Account is required"),
 
-  // Destination Wallet (For Transfer)
-  toWalletId: z.string().optional(),
+    // Destination Account (For Transfer)
+  toAccountId: z.string().optional(),
 }).refine((data) => {
-    // If transfer, require dest wallet
+    // If transfer, require dest account
     if (data.type === 'transfer') {
-        return !!data.toWalletId;
+        return !!data.toAccountId;
     }
     return true;
 }, {
-    message: "Destination wallet is required for transfers",
-    path: ["toWalletId"],
+    message: "Destination account is required for transfers",
+    path: ["toAccountId"],
 }).refine((data) => {
-    // If transfer, source and dest wallet cannot be the same
+    // If transfer, source and dest account cannot be the same
     if (data.type === 'transfer') {
-        return data.walletId !== data.toWalletId;
+        return data.accountId !== data.toAccountId;
     }
     return true;
 }, {
-    message: "Cannot transfer to the same wallet",
-    path: ["toWalletId"],
+    message: "Cannot transfer to the same account",
+    path: ["toAccountId"],
 });
 
 type AutoPriceStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -81,10 +81,10 @@ const getLocalDateTimeInputValue = () => {
 };
 
 export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
-  const [wallets, setWallets] = React.useState<any[]>([]);
+  const [accounts, setAccounts] = React.useState<Account[]>([]);
 
   React.useEffect(() => {
-    db.wallets.toArray().then(setWallets);
+    db.accounts.toArray().then(setAccounts);
   }, []);
 
   const form = useForm<TradeFormValues>({
@@ -92,8 +92,8 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
     defaultValues: {
       type: "trade",
       date: getLocalDateTimeInputValue(),
-      walletId: "",
-      toWalletId: "",
+      accountId: "",
+      toAccountId: "",
       assetOutTicker: "",
       assetOutAmount: "",
       assetOutUsdPrice: "",
@@ -316,7 +316,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
   }, [transactionType, normalizedAssetOutTicker, outAutoPriceStatus, outAutoPriceTicker]);
 
   const onSubmit = async (data: TradeFormValues) => {
-    const walletId = parseInt(data.walletId);
+    const accountId = parseInt(data.accountId);
     
     await db.transaction('rw', db.trades, db.ledger, async () => {
       // 1. Create Parent Trade
@@ -332,7 +332,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
         if (data.assetOutTicker && data.assetOutAmount) {
           await db.ledger.add({
             tradeId: tradeId as number,
-            walletId,
+            accountId,
             assetTicker: data.assetOutTicker.toUpperCase(),
             amount: -Math.abs(parseFloat(data.assetOutAmount)), // Negative
             usdPriceAtTime: data.assetOutUsdPrice ? parseFloat(data.assetOutUsdPrice) : undefined,
@@ -342,7 +342,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
         if (data.assetInTicker && data.assetInAmount) {
           await db.ledger.add({
             tradeId: tradeId as number,
-            walletId,
+            accountId,
             assetTicker: data.assetInTicker.toUpperCase(),
             amount: Math.abs(parseFloat(data.assetInAmount)), // Positive
             usdPriceAtTime: data.assetInUsdPrice ? parseFloat(data.assetInUsdPrice) : undefined,
@@ -352,7 +352,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
         if (data.assetInTicker && data.assetInAmount) {
            await db.ledger.add({
             tradeId: tradeId as number,
-            walletId,
+            accountId,
             assetTicker: data.assetInTicker.toUpperCase(),
             amount: Math.abs(parseFloat(data.assetInAmount)),
             // Deposits usually might not set cost basis, but we can allow it if user wants to set initial price
@@ -363,7 +363,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
          if (data.assetOutTicker && data.assetOutAmount) {
            await db.ledger.add({
             tradeId: tradeId as number,
-            walletId,
+            accountId,
             assetTicker: data.assetOutTicker.toUpperCase(),
             amount: -Math.abs(parseFloat(data.assetOutAmount)),
             usdPriceAtTime: data.assetOutUsdPrice ? parseFloat(data.assetOutUsdPrice) : undefined,
@@ -371,18 +371,18 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
         }
       } else if (data.type === 'transfer') {
           // Transfer logic:
-          // 1. Outgoing from Source Wallet
-          // 2. Incoming to Dest Wallet
+          // 1. Outgoing from Source Account
+          // 2. Incoming to Destination Account
           // We can reuse assetOut or assetIn fields, let's use assetIn for "The Asset"
-          if (data.assetInTicker && data.assetInAmount && data.toWalletId) {
+            if (data.assetInTicker && data.assetInAmount && data.toAccountId) {
              const amount = Math.abs(parseFloat(data.assetInAmount));
              const ticker = data.assetInTicker.toUpperCase();
-             const toWalletId = parseInt(data.toWalletId);
+             const toAccountId = parseInt(data.toAccountId);
 
              // Out from source
              await db.ledger.add({
                  tradeId: tradeId as number,
-                 walletId: walletId,
+               accountId,
                  assetTicker: ticker,
                  amount: -amount 
              });
@@ -390,7 +390,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
              // In to dest
              await db.ledger.add({
                  tradeId: tradeId as number,
-                 walletId: toWalletId,
+               accountId: toAccountId,
                  assetTicker: ticker,
                  amount: amount
              });
@@ -401,8 +401,8 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
     form.reset({
       type: "trade",
       date: getLocalDateTimeInputValue(),
-      walletId: "",
-      toWalletId: "",
+          accountId: "",
+          toAccountId: "",
       assetOutTicker: "",
       assetOutAmount: "",
       assetOutUsdPrice: "",
@@ -441,33 +441,41 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
 
       <div className="space-y-2">
          <Label>
-             {transactionType === 'transfer' ? 'From Wallet (Source)' : 'Wallet'}
+           {transactionType === 'transfer' ? 'From Account (Source)' : 'Account'}
          </Label>
          <select 
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            {...form.register("walletId")}
+            {...form.register("accountId")}
          >
-           <option value="" disabled>Select Wallet</option>
-           {wallets.map(w => (
-             <option key={w.id} value={w.id.toString()}>{w.name}</option>
-           ))}
+           <option value="" disabled>Select Account</option>
+           {accounts.map((account) =>
+             account.id ? (
+               <option key={account.id} value={account.id.toString()}>
+                 {account.name}
+               </option>
+             ) : null
+           )}
          </select>
-         {form.formState.errors.walletId && <p className="text-red-500 text-sm">{form.formState.errors.walletId.message}</p>}
+         {form.formState.errors.accountId && <p className="text-red-500 text-sm">{form.formState.errors.accountId.message}</p>}
       </div>
 
       {transactionType === 'transfer' && (
           <div className="space-y-2">
-            <Label>To Wallet (Destination)</Label>
+            <Label>To Account (Destination)</Label>
             <select 
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                {...form.register("toWalletId")}
+                {...form.register("toAccountId")}
             >
-            <option value="" disabled>Select Destination Wallet</option>
-            {wallets.map(w => (
-                <option key={w.id} value={w.id.toString()}>{w.name}</option>
-            ))}
+            <option value="" disabled>Select Destination Account</option>
+            {accounts.map((account) =>
+              account.id ? (
+                <option key={account.id} value={account.id.toString()}>
+                  {account.name}
+                </option>
+              ) : null
+            )}
             </select>
-            {form.formState.errors.toWalletId && <p className="text-red-500 text-sm">{form.formState.errors.toWalletId.message}</p>}
+            {form.formState.errors.toAccountId && <p className="text-red-500 text-sm">{form.formState.errors.toAccountId.message}</p>}
           </div>
       )}
 

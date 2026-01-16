@@ -29,7 +29,9 @@ export const importData = async (file: File, targetDb: OpenSimperfiDB = db): Pro
         const text = await file.text();
         const data: DatabaseDump = JSON.parse(text);
 
-        if (!data.wallets || !data.trades || !data.ledger) {
+        const hasAccounts = Array.isArray(data.accounts);
+        const hasLegacyWallets = Array.isArray(data.wallets);
+        if ((!hasAccounts && !hasLegacyWallets) || !data.trades || !data.ledger) {
             throw new Error('Invalid backup file structure: Missing required tables.');
         }
 

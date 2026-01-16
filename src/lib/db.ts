@@ -1,4 +1,5 @@
 import Dexie, { Table } from 'dexie';
+import { AccountTypeValue, normalizeAccountType, isLegacyAccountType } from './account-types';
 
 const DB_LIST_KEY = 'opensimperfi:dbs';
 const CURRENT_DB_KEY = 'opensimperfi:current-db';
@@ -41,10 +42,10 @@ const nowIso = () => new Date().toISOString();
 
 export type TransactionType = 'deposit' | 'withdraw' | 'trade' | 'transfer';
 
-export interface Wallet {
+export interface Account {
   id?: number;
   name: string;
-  type: 'hot' | 'cold' | 'exchange' | 'staked';
+  type: AccountTypeValue;
 }
 
 export interface Trade {
@@ -57,7 +58,7 @@ export interface Trade {
 export interface LedgerEntry {
   id?: number;
   tradeId: number;
-  walletId: number;
+  accountId: number;
   assetTicker: string;
   amount: number; // Positive for incoming, negative for outgoing
   usdPriceAtTime?: number; // Snapshot of price for historical PnL
@@ -180,7 +181,7 @@ const generateDatabaseId = (label: string, existing: ManagedDatabase[]) => {
 };
 
 export class OpenSimperfiDB extends Dexie {
-  wallets!: Table<Wallet>;
+  accounts!: Table<Account>;
   trades!: Table<Trade>;
   ledger!: Table<LedgerEntry>;
   targets!: Table<TargetAllocation>;
@@ -194,7 +195,7 @@ export class OpenSimperfiDB extends Dexie {
       trades: '++id, date, type',
       ledger: '++id, tradeId, walletId, assetTicker',
       targets: '&ticker',
-      settings: '++id'
+      settings: '++id',
     });
 
     this.version(2).stores({
@@ -203,8 +204,49 @@ export class OpenSimperfiDB extends Dexie {
       ledger: '++id, tradeId, walletId, assetTicker',
       targets: '&ticker',
       settings: '++id',
-      snapshots: '++id, date'
+      snapshots: '++id, date',
     });
+
+    this.version(3)
+      .stores({
+        accounts: '++id, name, type',
+        trades: '++id, date, type',
+        ledger: '++id, tradeId, accountId, assetTicker',
+        targets: '&ticker',
+        settings: '++id',
+        snapshots: '++id, date',
+        wallets: null,
+      })
+      .upgrade(async (tx) => {
+        const accountsTable = tx.table('accounts');
+        const ledgerTable = tx.table('ledger');
+
+        try {
+          const existingCount = await accountsTable.count();
+          if (existingCount === 0) {
+            const legacyWallets = await tx.table('wallets').toArray();
+            if (legacyWallets.length) {
+              await accountsTable.bulkAdd(
+                legacyWallets.map((wallet) => ({
+                  ...wallet,
+                  type: normalizeAccountType(wallet.type),
+                }))
+              );
+            }
+          }
+        } catch (error) {
+          console.warn('Account table migration skipped', error);
+        }
+
+        await ledgerTable.toCollection().modify((entry: any) => {
+          if (entry.walletId !== undefined) {
+            if (entry.accountId === undefined) {
+              entry.accountId = entry.walletId;
+            }
+            delete entry.walletId;
+          }
+        });
+      });
   }
 }
 
@@ -219,14 +261,16 @@ export const initDB = async (instance: OpenSimperfiDB = db) => {
   if (!instance.isOpen()) {
     await instance.open();
   }
-  const count = await instance.wallets.count();
+  const count = await instance.accounts.count();
   if (count === 0) {
-    await instance.wallets.add({ name: 'Main Wallet', type: 'hot' });
+    await instance.accounts.add({ name: 'Primary Account', type: 'crypto_wallet' });
   }
+  await migrateLegacyAccountTypes(instance);
 };
 
 export interface DatabaseDump {
-  wallets: Wallet[];
+  accounts?: Account[];
+  wallets?: Account[];
   trades: Trade[];
   ledger: LedgerEntry[];
   targets: TargetAllocation[];
@@ -244,6 +288,21 @@ const normalizeTrades = (records: Trade[]) =>
     date: trade.date instanceof Date ? trade.date : new Date(trade.date),
   }));
 
+const migrateLegacyAccountTypes = async (instance: OpenSimperfiDB) => {
+  const accounts = await instance.accounts.toArray();
+  const updates = accounts
+    .filter((account): account is Account & { id: number } =>
+      typeof account.id === 'number' && isLegacyAccountType(account.type)
+    )
+    .map((account) =>
+      instance.accounts.update(account.id, {
+        ...account,
+        type: normalizeAccountType(account.type),
+      })
+    );
+  await Promise.all(updates);
+};
+
 export const exportDatabaseDump = async (
   instance: OpenSimperfiDB = db,
   options: { includeSnapshots?: boolean } = {}
@@ -253,8 +312,8 @@ export const exportDatabaseDump = async (
     ? instance.snapshots.toArray()
     : Promise.resolve<SnapshotRecord[]>([]);
 
-  const [wallets, trades, ledger, targets, settings, snapshots] = await Promise.all([
-    instance.wallets.toArray(),
+  const [accounts, trades, ledger, targets, settings, snapshots] = await Promise.all([
+    instance.accounts.toArray(),
     instance.trades.toArray(),
     instance.ledger.toArray(),
     instance.targets.toArray(),
@@ -263,7 +322,8 @@ export const exportDatabaseDump = async (
   ]);
 
   return {
-    wallets,
+    accounts,
+    wallets: accounts,
     trades,
     ledger,
     targets,
@@ -271,31 +331,35 @@ export const exportDatabaseDump = async (
     snapshots: includeSnapshots ? snapshots : undefined,
     meta: {
       timestamp: nowIso(),
-      version: 2,
+      version: 3,
     },
   };
 };
 
 export const importDatabaseDump = async (instance: OpenSimperfiDB, payload: DatabaseDump) => {
   const tradesWithDates = normalizeTrades(payload.trades || []);
+  const normalizedAccounts = (payload.accounts || payload.wallets || []).map((account) => ({
+    ...account,
+    type: normalizeAccountType(account.type),
+  }));
 
   await instance.transaction(
     'rw',
-    instance.wallets,
+    instance.accounts,
     instance.trades,
     instance.ledger,
     instance.targets,
     instance.settings,
     async () => {
       await Promise.all([
-        instance.wallets.clear(),
+        instance.accounts.clear(),
         instance.trades.clear(),
         instance.ledger.clear(),
         instance.targets.clear(),
         instance.settings.clear(),
       ]);
 
-      if (payload.wallets?.length) await instance.wallets.bulkAdd(payload.wallets);
+      if (normalizedAccounts.length) await instance.accounts.bulkAdd(normalizedAccounts);
       if (tradesWithDates.length) await instance.trades.bulkAdd(tradesWithDates);
       if (payload.ledger?.length) await instance.ledger.bulkAdd(payload.ledger);
       if (payload.targets?.length) await instance.targets.bulkAdd(payload.targets);

@@ -28,16 +28,18 @@ interface EnrichedTrade extends Trade {
 export default function TransactionsPage() {
   const [trades, setTrades] = useState<EnrichedTrade[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [wallets, setWallets] = useState<Record<number, string>>({});
+  const [accounts, setAccounts] = useState<Record<number, string>>({});
 
   const fetchData = async () => {
-    // Fetch all wallets for lookup
-    const allWallets = await db.wallets.toArray();
-    const walletMap = allWallets.reduce((acc, w) => {
-      acc[w.id!] = w.name;
+    // Fetch all accounts for lookup
+    const allAccounts = await db.accounts.toArray();
+    const accountMap = allAccounts.reduce((acc, account) => {
+      if (account.id !== undefined) {
+        acc[account.id] = account.name;
+      }
       return acc;
     }, {} as Record<number, string>);
-    setWallets(walletMap);
+    setAccounts(accountMap);
 
     // Fetch all trades
     const allTrades = await db.trades.orderBy('date').reverse().toArray();
@@ -82,13 +84,17 @@ export default function TransactionsPage() {
         {outgoing.map(e => (
           <span key={e.id} className="text-red-500">
             Sent: {Math.abs(e.amount)} <strong>{e.assetTicker}</strong>
-            {wallets[e.walletId] && <span className="text-xs text-muted-foreground ml-1">({wallets[e.walletId]})</span>}
+            {e.accountId && accounts[e.accountId] && (
+              <span className="text-xs text-muted-foreground ml-1">({accounts[e.accountId]})</span>
+            )}
           </span>
         ))}
         {incoming.map(e => (
           <span key={e.id} className="text-green-600">
             Received: {Math.abs(e.amount)} <strong>{e.assetTicker}</strong>
-            {wallets[e.walletId] && <span className="text-xs text-muted-foreground ml-1">({wallets[e.walletId]})</span>}
+            {e.accountId && accounts[e.accountId] && (
+              <span className="text-xs text-muted-foreground ml-1">({accounts[e.accountId]})</span>
+            )}
           </span>
         ))}
         {trade.notes && <span className="text-xs text-muted-foreground italic max-w-xs">{trade.notes}</span>}

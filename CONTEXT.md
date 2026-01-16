@@ -8,7 +8,7 @@ OpenSimperfi is the open-source, privacy-focused edition of the Simperfi portfol
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS + shadcn/ui (Radix primitives)
 - **Data Layer**:
-  - Dexie.js for IndexedDB persistence (wallets, trades, ledger, targets, settings, snapshots)
+  - Dexie.js for IndexedDB persistence (accounts, trades, ledger, targets, settings, snapshots)
   - Dexie live queries for reactive UI updates
 - **Forms/Validation**: React Hook Form + Zod
 - **Realtime Prices**: Custom Binance WebSocket hook with optional manual overrides per ticker
@@ -22,7 +22,7 @@ OpenSimperfi is the open-source, privacy-focused edition of the Simperfi portfol
 - **Holdings** – Derived on the fly by walking ledger history to compute balances, weighted-average cost, last-buy price, and unrealized PnL.
 
 ### Data Storage & Management
-- **Wallets / Trades / Ledger** – Core financial tables, all tied to a specific Dexie database instance.
+- **Accounts / Trades / Ledger** – Core financial tables, all tied to a specific Dexie database instance.
 - **Targets** – Desired portfolio allocation per ticker, shown beside actual allocation in the dashboard.
 - **Settings** – App-level preferences (manual price overrides, etc.).
 - **Snapshots** – Daily JSON dumps (first run per day) with retention of the latest five days per database.

@@ -2,8 +2,8 @@
 
 ## Completed
 - [x] **Project Initialization** – Vite + React + TypeScript setup.
-- [x] **Dexie Schema & Ledger** – Wallets, trades, ledger, targets, settings, snapshots.
-- [x] **Wallet Management UI** – Add/edit/delete wallets with Dexie live queries.
+- [x] **Dexie Schema & Ledger** – Accounts, trades, ledger, targets, settings, snapshots.
+- [x] **Account Management UI** – Add/edit/delete accounts with Dexie live queries.
 - [x] **Transaction Workflow** – TradeForm with deposits, withdrawals, transfers, cost basis capture.
 - [x] **Dashboard Enhancements** – Holdings table with avg buy price, last-buy delta, PnL, allocation tracking.
 - [x] **Live Pricing** – Binance WebSocket hook plus manual price overrides per asset.
@@ -13,7 +13,7 @@
 ## In Progress / Next Steps
 - [ ] **Historical Analytics** – Persist price history for charts and “vs last trade” metrics.
 - [ ] **Portfolio Charts** – Time-series value, allocation drift, realized vs unrealized PnL.
-- [ ] **Advanced Reporting** – Tax lots, realized gains, wallet-level performance.
+- [ ] **Advanced Reporting** – Tax lots, realized gains, account-level performance.
 
 ## Future Improvements
 - [ ] **Mobile Optimization** – Responsive tables/forms and sticky summaries.

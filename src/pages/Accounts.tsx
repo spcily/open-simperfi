@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
-import { db, Wallet } from "@/lib/db";
+import { db, Account } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -19,28 +19,29 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { WalletForm } from "@/components/WalletForm";
+import { AccountForm } from "@/components/AccountForm";
+import { getAccountTypeLabel } from "@/lib/account-types";
 
-interface WalletWithBalance extends Wallet {
+interface AccountWithBalance extends Account {
   balanceSummary: string;
 }
 
-export default function Wallets() {
-  const [wallets, setWallets] = useState<WalletWithBalance[]>([]);
+export default function Accounts() {
+  const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingWallet, setEditingWallet] = useState<Wallet | null>(null);
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
   const fetchData = async () => {
     try {
-      const allWallets = await db.wallets.toArray();
+      const allAccounts = await db.accounts.toArray();
       const allLedger = await db.ledger.toArray();
 
-      const walletsWithBalances = allWallets.map((wallet) => {
-        const walletEntries = allLedger.filter((l) => l.walletId === wallet.id);
+      const accountsWithBalances = allAccounts.map((account) => {
+        const accountEntries = allLedger.filter((l) => l.accountId === account.id);
         
         // Sum by ticker
         const balances: Record<string, number> = {};
-        walletEntries.forEach((entry) => {
+        accountEntries.forEach((entry) => {
           balances[entry.assetTicker] = (balances[entry.assetTicker] || 0) + entry.amount;
         });
 
@@ -52,12 +53,12 @@ export default function Wallets() {
 
         const balanceSummary = summaryParts.length > 0 ? summaryParts.join(", ") : "No assets";
         
-        return { ...wallet, balanceSummary };
+        return { ...account, balanceSummary };
       });
 
-      setWallets(walletsWithBalances);
+      setAccounts(accountsWithBalances);
     } catch (error) {
-      console.error("Failed to fetch wallets:", error);
+      console.error("Failed to fetch accounts:", error);
     }
   };
 
@@ -66,19 +67,19 @@ export default function Wallets() {
   }, []);
 
   const handleDelete = async (id: number) => {
-    if (confirm("Are you sure you want to delete this wallet? This might affect transaction history if not cleaned up.")) {
-      await db.wallets.delete(id);
+    if (confirm("Are you sure you want to delete this account? This might affect transaction history if not cleaned up.")) {
+      await db.accounts.delete(id);
       fetchData();
     }
   };
 
-  const openEdit = (wallet: Wallet) => {
-    setEditingWallet(wallet);
+  const openEdit = (account: Account) => {
+    setEditingAccount(account);
     setIsDialogOpen(true);
   };
 
   const openNew = () => {
-    setEditingWallet(null);
+    setEditingAccount(null);
     setIsDialogOpen(true);
   };
 
@@ -90,30 +91,30 @@ export default function Wallets() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Wallets</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Accounts</h1>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
             <Button onClick={openNew}>
-              <Plus className="mr-2 h-4 w-4" /> Add Wallet
+              <Plus className="mr-2 h-4 w-4" /> Add Account
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{editingWallet ? "Edit Wallet" : "Create New Wallet"}</DialogTitle>
+              <DialogTitle>{editingAccount ? "Edit Account" : "Create New Account"}</DialogTitle>
               <DialogDescription>
-                {editingWallet
-                  ? "Update the details of your wallet."
-                  : "Add a new wallet to track your assets."}
+                {editingAccount
+                  ? "Update the details of your account."
+                  : "Add a new account to track your assets."}
               </DialogDescription>
             </DialogHeader>
-            <WalletForm onSuccess={handleSuccess} initialData={editingWallet} />
+            <AccountForm onSuccess={handleSuccess} initialData={editingAccount} />
           </DialogContent>
         </Dialog>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Your Wallets</CardTitle>
+          <CardTitle>Your Accounts</CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
@@ -126,30 +127,30 @@ export default function Wallets() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {wallets.length === 0 ? (
+              {accounts.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center text-muted-foreground h-24">
-                    No wallets found. Create one to get started.
+                    No accounts found. Create one to get started.
                   </TableCell>
                 </TableRow>
               ) : (
-                wallets.map((wallet) => (
-                  <TableRow key={wallet.id}>
-                    <TableCell className="font-medium">{wallet.name}</TableCell>
-                    <TableCell className="capitalize">{wallet.type}</TableCell>
-                    <TableCell>{wallet.balanceSummary}</TableCell>
+                accounts.map((account) => (
+                  <TableRow key={account.id}>
+                    <TableCell className="font-medium">{account.name}</TableCell>
+                    <TableCell>{getAccountTypeLabel(account.type)}</TableCell>
+                    <TableCell>{account.balanceSummary}</TableCell>
                     <TableCell className="text-right">
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => openEdit(wallet)}
+                        onClick={() => openEdit(account)}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => wallet.id && handleDelete(wallet.id)}
+                        onClick={() => account.id && handleDelete(account.id)}
                         className="text-red-500 hover:text-red-600"
                       >
                         <Trash2 className="h-4 w-4" />

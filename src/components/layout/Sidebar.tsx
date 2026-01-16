@@ -7,7 +7,7 @@ export function SidebarContent() {
     
     const links = [
         { href: "/", label: "Dashboard", icon: LayoutDashboard },
-        { href: "/wallets", label: "Wallets", icon: Wallet },
+        { href: "/accounts", label: "Accounts", icon: Wallet },
         { href: "/transactions", label: "Activity", icon: ArrowRightLeft },
         { href: "/settings", label: "Settings", icon: Settings },
     ];

@@ -464,7 +464,7 @@ export default function SettingsPage() {
           <DialogHeader>
             <DialogTitle>Overwrite Database?</DialogTitle>
             <DialogDescription>
-              This action will <strong>permanently delete all current data</strong> (wallets, trades, settings) and replace it with the data from the selected backup file.
+              This action will <strong>permanently delete all current data</strong> (accounts, trades, settings) and replace it with the data from the selected backup file.
               <br /><br />
               <strong>Selected file:</strong> {fileToImport?.name}
               <br /><br />
