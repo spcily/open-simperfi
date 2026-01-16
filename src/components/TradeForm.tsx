@@ -16,6 +16,7 @@ const tradeSchema = z.object({
   // Asset 1 (e.g., Sold / Outgoing)
   assetOutTicker: z.string().optional(),
   assetOutAmount: z.string().optional(), // Using string for easy input, parse later
+  assetOutUsdPrice: z.string().optional(),
   
   // Asset 2 (e.g., Bought / Incoming)
   assetInTicker: z.string().optional(),
@@ -47,6 +48,30 @@ const tradeSchema = z.object({
     path: ["toWalletId"],
 });
 
+type AutoPriceStatus = 'idle' | 'loading' | 'success' | 'error';
+
+const AUTO_PRICE_DEBOUNCE_MS = 600;
+
+const fetchUsdPriceForSymbol = async (ticker: string): Promise<number> => {
+  const pair = `${ticker}USDT`;
+  const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pair}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch live price');
+  }
+  const payload = await response.json();
+  const value = parseFloat(payload?.price);
+  if (!Number.isFinite(value)) {
+    throw new Error('Received invalid price');
+  }
+  return value;
+};
+
+const formatDecimal = (value: number, maxDecimals = 6): string => {
+  if (!Number.isFinite(value)) return '';
+  const rounded = Number(value.toFixed(maxDecimals));
+  return rounded.toString();
+};
+
 type TradeFormValues = z.infer<typeof tradeSchema>;
 
 const getLocalDateTimeInputValue = () => {
@@ -69,10 +94,214 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
       date: getLocalDateTimeInputValue(),
       walletId: "",
       toWalletId: "",
+      assetOutTicker: "",
+      assetOutAmount: "",
+      assetOutUsdPrice: "",
+      assetInTicker: "",
+      assetInAmount: "",
+      assetInUsdPrice: "",
+      notes: "",
     },
   });
 
   const transactionType = form.watch("type");
+  const assetInTickerValue = form.watch("assetInTicker");
+  const assetOutTickerValue = form.watch("assetOutTicker");
+  const assetInUsdPriceValue = form.watch("assetInUsdPrice");
+  const assetOutUsdPriceValue = form.watch("assetOutUsdPrice");
+  const normalizedAssetInTicker = (assetInTickerValue || '').trim().toUpperCase();
+  const normalizedAssetOutTicker = (assetOutTickerValue || '').trim().toUpperCase();
+  const [inAutoPriceStatus, setInAutoPriceStatus] = React.useState<AutoPriceStatus>('idle');
+  const [inAutoPriceTicker, setInAutoPriceTicker] = React.useState<string | null>(null);
+  const [outAutoPriceStatus, setOutAutoPriceStatus] = React.useState<AutoPriceStatus>('idle');
+  const [outAutoPriceTicker, setOutAutoPriceTicker] = React.useState<string | null>(null);
+  const [inPriceManuallyEdited, setInPriceManuallyEdited] = React.useState(false);
+  const [outPriceManuallyEdited, setOutPriceManuallyEdited] = React.useState(false);
+  const inTickerRef = React.useRef<string>('');
+  const outTickerRef = React.useRef<string>('');
+  const lastAmountEditedRef = React.useRef<'in' | 'out' | null>(null);
+  const previousPricesRef = React.useRef<{ in: string; out: string }>({ in: '', out: '' });
+
+  React.useEffect(() => {
+    if (inTickerRef.current !== normalizedAssetInTicker) {
+      setInPriceManuallyEdited(false);
+      inTickerRef.current = normalizedAssetInTicker;
+    }
+  }, [normalizedAssetInTicker]);
+
+  React.useEffect(() => {
+    if (outTickerRef.current !== normalizedAssetOutTicker) {
+      setOutPriceManuallyEdited(false);
+      outTickerRef.current = normalizedAssetOutTicker;
+    }
+  }, [normalizedAssetOutTicker]);
+
+  React.useEffect(() => {
+    setInPriceManuallyEdited(false);
+    setOutPriceManuallyEdited(false);
+    lastAmountEditedRef.current = null;
+    previousPricesRef.current = { in: '', out: '' };
+  }, [transactionType]);
+
+  React.useEffect(() => {
+    const priceFieldVisible = transactionType === 'trade' || transactionType === 'deposit';
+    if (!priceFieldVisible || !normalizedAssetInTicker) {
+      setInAutoPriceStatus('idle');
+      setInAutoPriceTicker(null);
+      return;
+    }
+
+    if ((inAutoPriceTicker === normalizedAssetInTicker && inAutoPriceStatus === 'success') ||
+        (inPriceManuallyEdited && inAutoPriceTicker === normalizedAssetInTicker)) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        setInAutoPriceStatus('loading');
+        const livePrice = normalizedAssetInTicker === 'USDT'
+          ? 1
+          : await fetchUsdPriceForSymbol(normalizedAssetInTicker);
+        if (cancelled) return;
+        setInAutoPriceTicker(normalizedAssetInTicker);
+        setInAutoPriceStatus('success');
+        form.setValue('assetInUsdPrice', formatDecimal(livePrice), { shouldDirty: true });
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Failed to fetch live price', error);
+        setInAutoPriceStatus('error');
+      }
+    }, AUTO_PRICE_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    normalizedAssetInTicker,
+    transactionType,
+    inPriceManuallyEdited,
+    inAutoPriceTicker,
+    inAutoPriceStatus,
+    form,
+  ]);
+
+  React.useEffect(() => {
+    const priceFieldVisible = transactionType === 'trade' || transactionType === 'withdraw';
+    if (!priceFieldVisible || !normalizedAssetOutTicker) {
+      setOutAutoPriceStatus('idle');
+      setOutAutoPriceTicker(null);
+      return;
+    }
+
+    if ((outAutoPriceTicker === normalizedAssetOutTicker && outAutoPriceStatus === 'success') ||
+        (outPriceManuallyEdited && outAutoPriceTicker === normalizedAssetOutTicker)) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        setOutAutoPriceStatus('loading');
+        const livePrice = normalizedAssetOutTicker === 'USDT'
+          ? 1
+          : await fetchUsdPriceForSymbol(normalizedAssetOutTicker);
+        if (cancelled) return;
+        setOutAutoPriceTicker(normalizedAssetOutTicker);
+        setOutAutoPriceStatus('success');
+        form.setValue('assetOutUsdPrice', formatDecimal(livePrice), { shouldDirty: true });
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Failed to fetch live price', error);
+        setOutAutoPriceStatus('error');
+      }
+    }, AUTO_PRICE_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    normalizedAssetOutTicker,
+    transactionType,
+    outPriceManuallyEdited,
+    outAutoPriceTicker,
+    outAutoPriceStatus,
+    form,
+  ]);
+
+  React.useEffect(() => {
+    if (transactionType !== 'trade') {
+      previousPricesRef.current = {
+        in: assetInUsdPriceValue || '',
+        out: assetOutUsdPriceValue || '',
+      };
+      return;
+    }
+
+    const prev = previousPricesRef.current;
+    const currentIn = assetInUsdPriceValue || '';
+    const currentOut = assetOutUsdPriceValue || '';
+    const inChanged = prev.in !== currentIn;
+    const outChanged = prev.out !== currentOut;
+    if (!inChanged && !outChanged) {
+      return;
+    }
+
+    previousPricesRef.current = { in: currentIn, out: currentOut };
+
+    const priceIn = parseFloat(currentIn);
+    const priceOut = parseFloat(currentOut);
+    if (!Number.isFinite(priceIn) || priceIn <= 0) return;
+    if (!Number.isFinite(priceOut) || priceOut <= 0) return;
+
+    const basis = lastAmountEditedRef.current;
+    if (!basis) return;
+
+    if (basis === 'out') {
+      const amountOut = parseFloat(form.getValues('assetOutAmount') || '');
+      if (!Number.isFinite(amountOut) || amountOut <= 0) return;
+      const derivedIn = (Math.abs(amountOut) * priceOut) / priceIn;
+      if (!Number.isFinite(derivedIn) || derivedIn <= 0) return;
+      form.setValue('assetInAmount', formatDecimal(derivedIn), { shouldDirty: true });
+    } else if (basis === 'in') {
+      const amountIn = parseFloat(form.getValues('assetInAmount') || '');
+      if (!Number.isFinite(amountIn) || amountIn <= 0) return;
+      const derivedOut = (Math.abs(amountIn) * priceIn) / priceOut;
+      if (!Number.isFinite(derivedOut) || derivedOut <= 0) return;
+      form.setValue('assetOutAmount', formatDecimal(derivedOut), { shouldDirty: true });
+    }
+  }, [
+    transactionType,
+    assetInUsdPriceValue,
+    assetOutUsdPriceValue,
+    form,
+  ]);
+
+  const buyPriceHelperText = React.useMemo(() => {
+    const priceFieldVisible = transactionType === 'trade' || transactionType === 'deposit';
+    if (!priceFieldVisible) return null;
+    if (!normalizedAssetInTicker) return 'Enter a ticker to auto-fill the live price.';
+    if (inAutoPriceStatus === 'loading') return `Fetching ${normalizedAssetInTicker} price...`;
+    if (inAutoPriceStatus === 'error') return 'Live price unavailable right now. Enter your own value.';
+    if (inAutoPriceStatus === 'success' && inAutoPriceTicker) {
+      return `Fetched live price for ${inAutoPriceTicker}. Adjust if needed.`;
+    }
+    return null;
+  }, [transactionType, normalizedAssetInTicker, inAutoPriceStatus, inAutoPriceTicker]);
+
+  const sellPriceHelperText = React.useMemo(() => {
+    const priceFieldVisible = transactionType === 'trade' || transactionType === 'withdraw';
+    if (!priceFieldVisible) return null;
+    if (!normalizedAssetOutTicker) return 'Enter a ticker to auto-fill the live price.';
+    if (outAutoPriceStatus === 'loading') return `Fetching ${normalizedAssetOutTicker} price...`;
+    if (outAutoPriceStatus === 'error') return 'Live price unavailable right now. Enter your own value.';
+    if (outAutoPriceStatus === 'success' && outAutoPriceTicker) {
+      return `Fetched live price for ${outAutoPriceTicker}. Adjust if needed.`;
+    }
+    return null;
+  }, [transactionType, normalizedAssetOutTicker, outAutoPriceStatus, outAutoPriceTicker]);
 
   const onSubmit = async (data: TradeFormValues) => {
     const walletId = parseInt(data.walletId);
@@ -94,6 +323,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
             walletId,
             assetTicker: data.assetOutTicker.toUpperCase(),
             amount: -Math.abs(parseFloat(data.assetOutAmount)), // Negative
+            usdPriceAtTime: data.assetOutUsdPrice ? parseFloat(data.assetOutUsdPrice) : undefined,
           });
         }
         // Incoming (Buying/swapping to)
@@ -124,6 +354,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
             walletId,
             assetTicker: data.assetOutTicker.toUpperCase(),
             amount: -Math.abs(parseFloat(data.assetOutAmount)),
+            usdPriceAtTime: data.assetOutUsdPrice ? parseFloat(data.assetOutUsdPrice) : undefined,
           });
         }
       } else if (data.type === 'transfer') {
@@ -162,11 +393,16 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
       toWalletId: "",
       assetOutTicker: "",
       assetOutAmount: "",
+      assetOutUsdPrice: "",
       assetInTicker: "",
       assetInAmount: "",
       assetInUsdPrice: "",
       notes: "",
     });
+    setInPriceManuallyEdited(false);
+    setOutPriceManuallyEdited(false);
+    lastAmountEditedRef.current = null;
+    previousPricesRef.current = { in: '', out: '' };
     onSuccess();
   };
 
@@ -227,14 +463,43 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
       {(transactionType === 'trade' || transactionType === 'withdraw') && (
         <div className="border p-4 rounded-md bg-red-50/50">
           <Label className="text-red-600 font-semibold mb-2 block">Outgoing (Sell/Send)</Label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div>
                <Label>Asset Symbol</Label>
                <Input placeholder="USDT, BTC" {...form.register("assetOutTicker")} />
             </div>
             <div>
                <Label>Amount</Label>
-               <Input type="number" step="any" placeholder="0.00" {...form.register("assetOutAmount")} />
+               <Input
+                 type="number"
+                 step="any"
+                 placeholder="0.00"
+                 {...form.register("assetOutAmount", {
+                   onChange: () => {
+                     lastAmountEditedRef.current = 'out';
+                   },
+                 })}
+               />
+            </div>
+            <div>
+              <Label>Price per Unit (USD)</Label>
+              <Input
+                type="number"
+                step="any"
+                placeholder="For Value"
+                {...form.register("assetOutUsdPrice", {
+                  onChange: () => {
+                    setOutPriceManuallyEdited(true);
+                    previousPricesRef.current = {
+                      in: previousPricesRef.current.in,
+                      out: '',
+                    };
+                  },
+                })}
+              />
+              {sellPriceHelperText && (
+                <p className="text-xs text-muted-foreground mt-1">{sellPriceHelperText}</p>
+              )}
             </div>
           </div>
         </div>
@@ -251,11 +516,37 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
             </div>
             <div className="col-span-1">
                <Label>Amount</Label>
-               <Input type="number" step="any" placeholder="0.00" {...form.register("assetInAmount")} />
+               <Input
+                 type="number"
+                 step="any"
+                 placeholder="0.00"
+                 {...form.register("assetInAmount", {
+                   onChange: () => {
+                     lastAmountEditedRef.current = 'in';
+                   },
+                 })}
+               />
             </div>
             <div className="col-span-1">
                <Label>Price per Unit (USD)</Label>
-               <Input type="number" step="any" placeholder="For Avg Cost" {...form.register("assetInUsdPrice")} />
+               <Input
+                 type="number"
+                 step="any"
+                 placeholder="For Avg Cost"
+                 {...form.register("assetInUsdPrice", {
+                   onChange: () => {
+                     setInPriceManuallyEdited(true);
+                     setOutPriceManuallyEdited(false);
+                     previousPricesRef.current = {
+                       in: '',
+                       out: previousPricesRef.current.out,
+                     };
+                   },
+                 })}
+               />
+               {buyPriceHelperText && (
+                 <p className="text-xs text-muted-foreground mt-1">{buyPriceHelperText}</p>
+               )}
             </div>
           </div>
         </div>
