@@ -117,6 +117,8 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
   const [outAutoPriceTicker, setOutAutoPriceTicker] = React.useState<string | null>(null);
   const [inPriceManuallyEdited, setInPriceManuallyEdited] = React.useState(false);
   const [outPriceManuallyEdited, setOutPriceManuallyEdited] = React.useState(false);
+  const [inPriceFetchBlockedTicker, setInPriceFetchBlockedTicker] = React.useState<string | null>(null);
+  const [outPriceFetchBlockedTicker, setOutPriceFetchBlockedTicker] = React.useState<string | null>(null);
   const inTickerRef = React.useRef<string>('');
   const outTickerRef = React.useRef<string>('');
   const lastAmountEditedRef = React.useRef<'in' | 'out' | null>(null);
@@ -125,6 +127,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
   React.useEffect(() => {
     if (inTickerRef.current !== normalizedAssetInTicker) {
       setInPriceManuallyEdited(false);
+      setInPriceFetchBlockedTicker(null);
       inTickerRef.current = normalizedAssetInTicker;
     }
   }, [normalizedAssetInTicker]);
@@ -132,6 +135,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
   React.useEffect(() => {
     if (outTickerRef.current !== normalizedAssetOutTicker) {
       setOutPriceManuallyEdited(false);
+      setOutPriceFetchBlockedTicker(null);
       outTickerRef.current = normalizedAssetOutTicker;
     }
   }, [normalizedAssetOutTicker]);
@@ -141,6 +145,8 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
     setOutPriceManuallyEdited(false);
     lastAmountEditedRef.current = null;
     previousPricesRef.current = { in: '', out: '' };
+    setInPriceFetchBlockedTicker(null);
+    setOutPriceFetchBlockedTicker(null);
   }, [transactionType]);
 
   React.useEffect(() => {
@@ -152,7 +158,8 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
     }
 
     if ((inAutoPriceTicker === normalizedAssetInTicker && inAutoPriceStatus === 'success') ||
-        (inPriceManuallyEdited && inAutoPriceTicker === normalizedAssetInTicker)) {
+        (inPriceManuallyEdited && inAutoPriceTicker === normalizedAssetInTicker) ||
+        (inPriceFetchBlockedTicker === normalizedAssetInTicker)) {
       return;
     }
 
@@ -171,6 +178,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
         if (cancelled) return;
         console.error('Failed to fetch live price', error);
         setInAutoPriceStatus('error');
+        setInPriceFetchBlockedTicker(normalizedAssetInTicker);
       }
     }, AUTO_PRICE_DEBOUNCE_MS);
 
@@ -182,6 +190,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
     normalizedAssetInTicker,
     transactionType,
     inPriceManuallyEdited,
+    inPriceFetchBlockedTicker,
     inAutoPriceTicker,
     inAutoPriceStatus,
     form,
@@ -196,7 +205,8 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
     }
 
     if ((outAutoPriceTicker === normalizedAssetOutTicker && outAutoPriceStatus === 'success') ||
-        (outPriceManuallyEdited && outAutoPriceTicker === normalizedAssetOutTicker)) {
+        (outPriceManuallyEdited && outAutoPriceTicker === normalizedAssetOutTicker) ||
+        (outPriceFetchBlockedTicker === normalizedAssetOutTicker)) {
       return;
     }
 
@@ -215,6 +225,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
         if (cancelled) return;
         console.error('Failed to fetch live price', error);
         setOutAutoPriceStatus('error');
+        setOutPriceFetchBlockedTicker(normalizedAssetOutTicker);
       }
     }, AUTO_PRICE_DEBOUNCE_MS);
 
@@ -226,6 +237,7 @@ export function TradeForm({ onSuccess }: { onSuccess: () => void }) {
     normalizedAssetOutTicker,
     transactionType,
     outPriceManuallyEdited,
+    outPriceFetchBlockedTicker,
     outAutoPriceTicker,
     outAutoPriceStatus,
     form,
