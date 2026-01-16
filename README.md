@@ -15,6 +15,9 @@ OpenSimperfi allows you to track your crypto assets without sending your data to
 - **Portfolio Targets** – Define desired percentage per asset and monitor drift.
 - **Database Management** – Create, clone, select, and delete isolated Dexie databases for experiments or multiple portfolios.
 - **Backups & Snapshots** – One-click JSON export/import plus automatic daily snapshots (last five days) per database.
+- **Dark Mode** – Full dark/light/system theme support with persistent preferences.
+- **Smart Asset Input** – Autocomplete dropdown for asset tickers with top 10 suggestions from your portfolio.
+- **Mobile Responsive** – Optimized card-based layouts for phones and tablets with touch-friendly controls.
 
 ## Getting Started
 
