@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, LedgerEntry } from '@/lib/db';
+import { db, LedgerEntry, Trade, TargetAllocation, AppSettings } from '@/lib/db';
 import { useLivePrices } from '@/hooks/use-live-prices';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -11,6 +11,7 @@ import { TradeForm } from '@/components/TradeForm';
 import { AllocationForm } from '@/components/AllocationForm';
 import { formatCurrency, formatCrypto, cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogTrigger, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Skeleton } from '@/components/ui/skeleton';
 import { Pencil } from 'lucide-react';
 
 // Extended type for View
@@ -20,6 +21,17 @@ interface AssetHolding {
     avgBuyPrice: number;
     lastBuyPrice: number;
     totalCostBasis: number;
+}
+
+interface DashboardSnapshot {
+    holdings: AssetHolding[];
+    prices: Record<string, number>;
+    totals: {
+        totalValue: number;
+        totalCostBasis: number;
+        totalUnrealizedPnL: number;
+        totalPnLPercent: number;
+    };
 }
 
 // Helper to consolidate ledger entries AND calculate avg buy price
@@ -107,10 +119,17 @@ export default function Dashboard() {
     const [priceDialogError, setPriceDialogError] = React.useState<string | null>(null);
 
     // Live query to the DB
-    const ledger = useLiveQuery(() => db.ledger.toArray());
-    const trades = useLiveQuery(() => db.trades.toArray());
-    const targets = useLiveQuery(() => db.targets.toArray());
-    const settings = useLiveQuery(() => db.settings.get(1));
+    const ledger = useLiveQuery(() => db.ledger.toArray(), [], undefined as LedgerEntry[] | undefined);
+    const trades = useLiveQuery(() => db.trades.toArray(), [], undefined as Trade[] | undefined);
+    const targets = useLiveQuery(() => db.targets.toArray(), [], undefined as TargetAllocation[] | undefined);
+    const settings = useLiveQuery(async () => {
+        const record = await db.settings.get(1);
+        return record ?? { id: 1, customPrices: {} };
+    }, [], undefined as AppSettings | undefined);
+
+    const [snapshot, setSnapshot] = React.useState<DashboardSnapshot | null>(null);
+    const [, startTransition] = React.useTransition();
+    const lastStablePricesRef = React.useRef<Record<string, number>>({});
 
     const transferTradeIds = React.useMemo<Set<number> | undefined>(() => {
         if (!trades) return undefined;
@@ -123,7 +142,7 @@ export default function Dashboard() {
         return ids;
     }, [trades]);
 
-    const holdings = React.useMemo(() => calculateHoldings(ledger, transferTradeIds), [ledger, transferTradeIds]);
+    const holdings = React.useMemo(() => calculateHoldings(ledger || [], transferTradeIds), [ledger, transferTradeIds]);
     
     // Derived Array of assets we need prices for
     const assetList = React.useMemo(() => holdings.map(h => h.ticker), [holdings]);
@@ -180,21 +199,83 @@ export default function Dashboard() {
         closePriceDialog();
     };
 
-    // Derived Financials
-    const totalValue = holdings.reduce((sum, h) => {
-        const price = prices[h.ticker] || 0;
-        return sum + (h.amount * price);
-    }, 0);
+    const ledgerReady = Array.isArray(ledger);
+    const tradesReady = Array.isArray(trades);
+    const targetsReady = Array.isArray(targets);
+    const settingsReady = Boolean(settings);
+    const readyForCalculation = ledgerReady && tradesReady && targetsReady && settingsReady;
 
-    const totalCostBasis = holdings.reduce((sum, h) => sum + h.totalCostBasis, 0);
-    const totalUnrealizedPnL = totalValue - totalCostBasis;
-    const totalPnLPercent = totalCostBasis > 0 ? (totalUnrealizedPnL / totalCostBasis) * 100 : 0;
+    React.useEffect(() => {
+        if (!readyForCalculation) {
+            return;
+        }
+
+        const allPricesResolved = holdings.every((holding) => {
+            const livePrice = prices[holding.ticker];
+            if (Number.isFinite(livePrice)) return true;
+            return lastStablePricesRef.current[holding.ticker] !== undefined;
+        });
+
+        if (!allPricesResolved) {
+            return;
+        }
+
+        let cancelled = false;
+        startTransition(() => {
+            if (cancelled) return;
+
+            const resolvedPrices: Record<string, number> = {};
+            holdings.forEach((holding) => {
+                const livePrice = prices[holding.ticker];
+                if (Number.isFinite(livePrice)) {
+                    resolvedPrices[holding.ticker] = livePrice as number;
+                } else if (lastStablePricesRef.current[holding.ticker] !== undefined) {
+                    resolvedPrices[holding.ticker] = lastStablePricesRef.current[holding.ticker];
+                } else {
+                    resolvedPrices[holding.ticker] = 0;
+                }
+            });
+
+            const totalCostBasis = holdings.reduce((sum, h) => sum + h.totalCostBasis, 0);
+            const totalValue = holdings.reduce((sum, h) => sum + h.amount * (resolvedPrices[h.ticker] || 0), 0);
+            const totalUnrealizedPnL = totalValue - totalCostBasis;
+            const totalPnLPercent = totalCostBasis > 0 ? (totalUnrealizedPnL / totalCostBasis) * 100 : 0;
+
+            if (cancelled) return;
+
+            lastStablePricesRef.current = resolvedPrices;
+            setSnapshot({
+                holdings,
+                prices: resolvedPrices,
+                totals: {
+                    totalValue,
+                    totalCostBasis,
+                    totalUnrealizedPnL,
+                    totalPnLPercent,
+                },
+            });
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [readyForCalculation, holdings, prices]);
 
     const targetMap = React.useMemo(() => {
         const map = new Map<string, number>();
-        targets?.forEach(t => map.set(t.ticker, t.percentage));
+        (targets || []).forEach((t) => map.set(t.ticker, t.percentage));
         return map;
     }, [targets]);
+
+    const hasSnapshot = Boolean(snapshot);
+    const totals = snapshot?.totals || {
+        totalValue: 0,
+        totalCostBasis: 0,
+        totalUnrealizedPnL: 0,
+        totalPnLPercent: 0,
+    };
+    const displayedHoldings = snapshot?.holdings || [];
+    const priceFor = (ticker: string) => snapshot?.prices[ticker] || 0;
 
     return (
         <div className="container mx-auto p-4 space-y-6">
@@ -233,10 +314,19 @@ export default function Dashboard() {
                         <CardTitle className="text-sm font-medium">Total Portfolio Value</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">{formatCurrency(totalValue)}</div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                           Cost Basis: {formatCurrency(totalCostBasis)}
-                        </p>
+                        {hasSnapshot ? (
+                            <>
+                                <div className="text-2xl font-bold">{formatCurrency(totals.totalValue)}</div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                   Cost Basis: {formatCurrency(totals.totalCostBasis)}
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <Skeleton className="h-8 w-32 mb-2" />
+                                <Skeleton className="h-4 w-24" />
+                            </>
+                        )}
                     </CardContent>
                 </Card>
                 <Card>
@@ -244,12 +334,27 @@ export default function Dashboard() {
                          <CardTitle className="text-sm font-medium">Unrealized PnL</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className={cn("text-2xl font-bold", totalUnrealizedPnL >= 0 ? "text-green-600" : "text-red-500")}>
-                            {totalUnrealizedPnL > 0 ? '+' : ''}{formatCurrency(totalUnrealizedPnL)}
-                        </div>
-                        <p className={cn("text-xs mt-1", totalPnLPercent >= 0 ? "text-green-600" : "text-red-500")}>
-                             {totalPnLPercent > 0 ? '+' : ''}{totalPnLPercent.toFixed(2)}%
-                        </p>
+                        {hasSnapshot ? (
+                            <>
+                                <div className={cn(
+                                    "text-2xl font-bold",
+                                    totals.totalUnrealizedPnL >= 0 ? "text-green-600" : "text-red-500"
+                                )}>
+                                    {totals.totalUnrealizedPnL > 0 ? '+' : ''}{formatCurrency(totals.totalUnrealizedPnL)}
+                                </div>
+                                <p className={cn(
+                                    "text-xs mt-1",
+                                    totals.totalPnLPercent >= 0 ? "text-green-600" : "text-red-500"
+                                )}>
+                                     {totals.totalPnLPercent > 0 ? '+' : ''}{totals.totalPnLPercent.toFixed(2)}%
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <Skeleton className="h-8 w-32 mb-2" />
+                                <Skeleton className="h-4 w-20" />
+                            </>
+                        )}
                     </CardContent>
                 </Card>
             </div>
@@ -259,31 +364,61 @@ export default function Dashboard() {
                     <CardTitle>Holdings</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Asset</TableHead>
-                                <TableHead className="text-right">Balance</TableHead>
-                                <TableHead className="text-right">Price</TableHead>
-                                <TableHead className="text-right">vs Last Buy</TableHead>
-                                <TableHead className="text-right">Avg Buy</TableHead>
-                                <TableHead className="text-right">Value</TableHead>
-                                <TableHead className="text-right">Unrealized PnL</TableHead>
-                                <TableHead className="text-right">Allocation (Actual / Target)</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {holdings.map((h) => {
-                                const price = prices[h.ticker] || 0;
-                                const isManualPrice = customPrices[h.ticker] !== undefined;
-                                const value = h.amount * price;
-                                const actualPct = totalValue > 0 ? (value / totalValue) * 100 : 0;
-                                const targetPct = targetMap.get(h.ticker) || 0;
-                                const diff = actualPct - targetPct;
+                    {!hasSnapshot ? (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Asset</TableHead>
+                                    <TableHead className="text-right">Balance</TableHead>
+                                    <TableHead className="text-right">Price</TableHead>
+                                    <TableHead className="text-right">vs Last Buy</TableHead>
+                                    <TableHead className="text-right">Avg Buy</TableHead>
+                                    <TableHead className="text-right">Value</TableHead>
+                                    <TableHead className="text-right">Unrealized PnL</TableHead>
+                                    <TableHead className="text-right">Allocation (Actual / Target)</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {[1, 2, 3].map((i) => (
+                                    <TableRow key={i}>
+                                        <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                                        <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                                        <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                        <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                        <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                        <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                                        <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                                        <TableCell className="text-right"><Skeleton className="h-4 w-24 ml-auto" /></TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    ) : (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Asset</TableHead>
+                                    <TableHead className="text-right">Balance</TableHead>
+                                    <TableHead className="text-right">Price</TableHead>
+                                    <TableHead className="text-right">vs Last Buy</TableHead>
+                                    <TableHead className="text-right">Avg Buy</TableHead>
+                                    <TableHead className="text-right">Value</TableHead>
+                                    <TableHead className="text-right">Unrealized PnL</TableHead>
+                                    <TableHead className="text-right">Allocation (Actual / Target)</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {displayedHoldings.map((h) => {
+                                    const price = priceFor(h.ticker);
+                                    const isManualPrice = customPrices[h.ticker] !== undefined;
+                                    const value = h.amount * price;
+                                    const actualPct = totals.totalValue > 0 ? (value / totals.totalValue) * 100 : 0;
+                                    const targetPct = targetMap.get(h.ticker) || 0;
+                                    const diff = actualPct - targetPct;
 
-                                const pnl = value - h.totalCostBasis;
-                                const pnlPercent = h.totalCostBasis > 0 ? (pnl / h.totalCostBasis) * 100 : 0;
-                                const lastBuyDiff = h.lastBuyPrice > 0 ? ((price - h.lastBuyPrice) / h.lastBuyPrice) * 100 : 0;
+                                    const pnl = value - h.totalCostBasis;
+                                    const pnlPercent = h.totalCostBasis > 0 ? (pnl / h.totalCostBasis) * 100 : 0;
+                                    const lastBuyDiff = h.lastBuyPrice > 0 ? ((price - h.lastBuyPrice) / h.lastBuyPrice) * 100 : 0;
 
                                 return (
                                     <TableRow key={h.ticker}>
@@ -338,6 +473,7 @@ export default function Dashboard() {
                             })}
                         </TableBody>
                     </Table>
+                    )}
                 </CardContent>
             </Card>
 
