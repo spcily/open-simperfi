@@ -17,8 +17,12 @@ function App() {
     setup();
   }, []);
 
+  const basename = import.meta.env.BASE_URL === '/'
+    ? undefined
+    : import.meta.env.BASE_URL.replace(/\/$/, '')
+
   return (
-    <Router>
+    <Router basename={basename}>
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />

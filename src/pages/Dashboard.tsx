@@ -23,10 +23,19 @@ interface AssetHolding {
 }
 
 // Helper to consolidate ledger entries AND calculate avg buy price
-const calculateHoldings = (entries: LedgerEntry[] = []): AssetHolding[] => {
+const calculateHoldings = (entries: LedgerEntry[] = [], transferTradeIds?: Set<number>): AssetHolding[] => {
+    const filteredEntries = transferTradeIds
+        ? entries.filter((entry) => {
+            if (entry.tradeId === undefined || entry.tradeId === null) {
+                return true;
+            }
+            return !transferTradeIds.has(entry.tradeId);
+        })
+        : entries;
+
     // Group by ticker first
     const grouped: Record<string, LedgerEntry[]> = {};
-    entries.forEach(e => {
+    filteredEntries.forEach(e => {
         if (!grouped[e.assetTicker]) grouped[e.assetTicker] = [];
         grouped[e.assetTicker].push(e);
     });
@@ -99,10 +108,22 @@ export default function Dashboard() {
 
     // Live query to the DB
     const ledger = useLiveQuery(() => db.ledger.toArray());
+    const trades = useLiveQuery(() => db.trades.toArray());
     const targets = useLiveQuery(() => db.targets.toArray());
     const settings = useLiveQuery(() => db.settings.get(1));
 
-    const holdings = React.useMemo(() => calculateHoldings(ledger), [ledger]);
+    const transferTradeIds = React.useMemo<Set<number> | undefined>(() => {
+        if (!trades) return undefined;
+        const ids = new Set<number>();
+        trades.forEach((trade) => {
+            if (trade.type === 'transfer' && typeof trade.id === 'number') {
+                ids.add(trade.id);
+            }
+        });
+        return ids;
+    }, [trades]);
+
+    const holdings = React.useMemo(() => calculateHoldings(ledger, transferTradeIds), [ledger, transferTradeIds]);
     
     // Derived Array of assets we need prices for
     const assetList = React.useMemo(() => holdings.map(h => h.ticker), [holdings]);
