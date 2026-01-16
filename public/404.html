@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>OpenSimperfi</title>
+    <script>
+      (function () {
+        try {
+          var STORAGE_KEY = '__opensimperfi_redirect';
+          var basePath = '/open-simperfi';
+          var path = window.location.pathname + window.location.search + window.location.hash;
+          sessionStorage.setItem(STORAGE_KEY, path);
+          window.location.replace(basePath + '/');
+        } catch (error) {
+          console.error('Redirect failed', error);
+        }
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>

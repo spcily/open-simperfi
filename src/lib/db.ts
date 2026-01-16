@@ -9,6 +9,8 @@ const DEFAULT_DB_LABEL = 'Primary Portfolio';
 const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 const memoryStorage: Record<string, string> = {};
 
+const SPA_REDIRECT_STORAGE_KEY = '__opensimperfi_redirect';
+
 const readStorage = (key: string): string | null => {
   if (isBrowser) {
     return window.localStorage.getItem(key);
@@ -105,6 +107,19 @@ const getStoredCurrentDatabaseId = (): string | null => readStorage(CURRENT_DB_K
 
 const setStoredCurrentDatabaseId = (id: string) => {
   writeStorage(CURRENT_DB_KEY, id);
+};
+
+export const reloadApplicationPreservingRoute = () => {
+  if (!isBrowser) return;
+  try {
+    const path = window.location.pathname + window.location.search + window.location.hash;
+    sessionStorage.setItem(SPA_REDIRECT_STORAGE_KEY, path);
+  } catch (error) {
+    console.warn('Failed to persist redirect path', error);
+  }
+  const base = import.meta.env.BASE_URL || '/';
+  const target = base.endsWith('/') ? base : `${base}/`;
+  window.location.href = target;
 };
 
 const ensureManagedDatabases = () => {
@@ -448,18 +463,14 @@ export const deleteManagedDatabase = async (id: string) => {
   if (currentId === id) {
     const nextId = updated[0].id;
     setStoredCurrentDatabaseId(nextId);
-    if (isBrowser) {
-      window.location.reload();
-    }
+    reloadApplicationPreservingRoute();
   }
 };
 
 export const selectManagedDatabase = (id: string) => {
   getMetaOrThrow(id);
   setStoredCurrentDatabaseId(id);
-  if (isBrowser) {
-    window.location.reload();
-  }
+  reloadApplicationPreservingRoute();
 };
 
 export const cloneManagedDatabase = async (sourceId: string, label: string) => {

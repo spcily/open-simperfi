@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { exportData, importData } from '@/lib/backup-service';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
-import { db, getManagedDatabases, getCurrentDatabaseId, createManagedDatabase, deleteManagedDatabase, selectManagedDatabase, ManagedDatabase, SnapshotRecord } from '@/lib/db';
+import { db, getManagedDatabases, getCurrentDatabaseId, createManagedDatabase, deleteManagedDatabase, selectManagedDatabase, ManagedDatabase, SnapshotRecord, reloadApplicationPreservingRoute } from '@/lib/db';
 import { restoreSnapshot } from '@/lib/snapshot-service';
 import { formatCurrency } from '@/lib/utils';
 
@@ -71,7 +71,7 @@ export default function SettingsPage() {
       await importData(fileToImport);
       setIsDialogOpen(false);
       alert('Data restored successfully! The page will now reload.');
-      window.location.reload();
+      reloadApplicationPreservingRoute();
     } catch (error) {
       console.error(error);
       alert('Failed to restore data. Please check the file format.');
@@ -145,7 +145,7 @@ export default function SettingsPage() {
     try {
       await restoreSnapshot(snapshotId);
       alert('Snapshot restored. The app will reload.');
-      window.location.reload();
+      reloadApplicationPreservingRoute();
     } catch (error) {
       console.error(error);
       alert(error instanceof Error ? error.message : 'Failed to restore snapshot');
