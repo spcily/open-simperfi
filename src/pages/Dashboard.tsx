@@ -21,7 +21,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AllocationForm } from "@/components/AllocationForm";
-import { TradeFormComponent } from "@/components/forms/TradeFormComponent";
+import { BuyFormComponent } from "@/components/forms/BuyFormComponent";
+import { SellFormComponent } from "@/components/forms/SellFormComponent";
 import { DepositFormComponent } from "@/components/forms/DepositFormComponent";
 import { WithdrawFormComponent } from "@/components/forms/WithdrawFormComponent";
 import { TransferFormComponent } from "@/components/forms/TransferFormComponent";
@@ -234,7 +235,8 @@ const CHART_COLORS = [
 ];
 
 export default function Dashboard() {
-    const [isTradeModalOpen, setIsTradeModalOpen] = React.useState(false);
+    const [isBuyModalOpen, setIsBuyModalOpen] = React.useState(false);
+    const [isSellModalOpen, setIsSellModalOpen] = React.useState(false);
     const [isDepositModalOpen, setIsDepositModalOpen] = React.useState(false);
     const [isWithdrawModalOpen, setIsWithdrawModalOpen] = React.useState(false);
     const [isTransferModalOpen, setIsTransferModalOpen] = React.useState(false);
@@ -512,19 +514,38 @@ export default function Dashboard() {
 
                     <div className="flex gap-2 flex-wrap">
                         <Dialog
-                            open={isTradeModalOpen}
-                            onOpenChange={setIsTradeModalOpen}
+                            open={isBuyModalOpen}
+                            onOpenChange={setIsBuyModalOpen}
                         >
                             <DialogTrigger asChild>
-                                <Button variant="outline">+ Trade</Button>
+                                <Button variant="outline">+ Buy</Button>
                             </DialogTrigger>
-                            <DialogContent className="sm:max-w-[700px] max-w-[95vw] flex flex-col p-0">
+                            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
                                 <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4">
-                                    <DialogTitle>Add Trade</DialogTitle>
+                                    <DialogTitle>Add Buy Order</DialogTitle>
                                 </DialogHeader>
                                 <div className="overflow-y-auto px-4 sm:px-6 h-[60vh] sm:h-[500px]">
-                                    <TradeFormComponent
-                                        onSuccess={() => setIsTradeModalOpen(false)}
+                                    <BuyFormComponent
+                                        onSuccess={() => setIsBuyModalOpen(false)}
+                                    />
+                                </div>
+                            </DialogContent>
+                        </Dialog>
+
+                        <Dialog
+                            open={isSellModalOpen}
+                            onOpenChange={setIsSellModalOpen}
+                        >
+                            <DialogTrigger asChild>
+                                <Button variant="outline">+ Sell</Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
+                                <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4">
+                                    <DialogTitle>Add Sell Order</DialogTitle>
+                                </DialogHeader>
+                                <div className="overflow-y-auto px-4 sm:px-6 h-[60vh] sm:h-[500px]">
+                                    <SellFormComponent
+                                        onSuccess={() => setIsSellModalOpen(false)}
                                     />
                                 </div>
                             </DialogContent>

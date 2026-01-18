@@ -48,14 +48,6 @@ export function DepositFormComponent({ onSuccess }: { onSuccess: () => void }) {
   const [availableAssets, setAvailableAssets] = React.useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  React.useEffect(() => {
-    db.accounts.toArray().then(setAccounts);
-    db.ledger.toArray().then((entries) => {
-      const uniqueTickers = [...new Set(entries.map(e => e.assetTicker))].sort();
-      setAvailableAssets(uniqueTickers);
-    });
-  }, []);
-
   const form = useForm<DepositFormValues>({
     resolver: zodResolver(depositSchema),
     defaultValues: {
@@ -67,6 +59,24 @@ export function DepositFormComponent({ onSuccess }: { onSuccess: () => void }) {
       notes: "",
     },
   });
+
+  // Load data and auto-select first account
+  React.useEffect(() => {
+    const loadData = async () => {
+      const accountsList = await db.accounts.toArray();
+      setAccounts(accountsList);
+
+      // Auto-select first account
+      if (accountsList.length > 0 && accountsList[0].id) {
+        form.setValue("accountId", String(accountsList[0].id));
+      }
+
+      const entries = await db.ledger.toArray();
+      const uniqueTickers = [...new Set(entries.map(e => e.assetTicker))].sort();
+      setAvailableAssets(uniqueTickers);
+    };
+    loadData();
+  }, [form]);
 
   // Auto-fetch price
   const assetTicker = form.watch("assetTicker");
@@ -121,65 +131,66 @@ export function DepositFormComponent({ onSuccess }: { onSuccess: () => void }) {
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-      <div>
-        <Label htmlFor="date">Date & Time</Label>
-        <Input
-          id="date"
-          type="datetime-local"
-          {...form.register("date")}
-        />
-        {form.formState.errors.date && (
-          <p className="text-xs text-red-500 mt-1">{form.formState.errors.date.message}</p>
-        )}
-      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <Label htmlFor="date">Date & Time</Label>
+          <Input
+            id="date"
+            type="datetime-local"
+            {...form.register("date")}
+          />
+          {form.formState.errors.date && (
+            <p className="text-xs text-red-500 mt-1">{form.formState.errors.date.message}</p>
+          )}
+        </div>
 
-      <div>
-        <Label htmlFor="accountId">Account</Label>
-        <Select onValueChange={(v) => form.setValue("accountId", v)} value={form.watch("accountId")}>
-          <SelectTrigger>
-            <SelectValue placeholder="Select account" />
-          </SelectTrigger>
-          <SelectContent>
-            {accounts.map((acc) => (
-              <SelectItem key={acc.id} value={String(acc.id)}>
-                {acc.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {form.formState.errors.accountId && (
-          <p className="text-xs text-red-500 mt-1">{form.formState.errors.accountId.message}</p>
-        )}
+        <div>
+          <Label htmlFor="accountId">Account</Label>
+          <Select onValueChange={(v) => form.setValue("accountId", v)} value={form.watch("accountId")}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select account" />
+            </SelectTrigger>
+            <SelectContent>
+              {accounts.map((acc) => (
+                <SelectItem key={acc.id} value={String(acc.id)}>
+                  {acc.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {form.formState.errors.accountId && (
+            <p className="text-xs text-red-500 mt-1">{form.formState.errors.accountId.message}</p>
+          )}
+        </div>
       </div>
 
       <div className="border rounded-lg p-3 bg-green-50 dark:bg-green-950/20">
         <h3 className="font-semibold text-sm mb-3 text-green-700 dark:text-green-400">Deposit Details</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="space-y-3">
           <div>
-            <Label htmlFor="assetTicker">Asset</Label>
-            <AssetCombobox
-              value={form.watch("assetTicker")}
-              onValueChange={(v: string) => form.setValue("assetTicker", v)}
-              placeholder="e.g. BTC"
-              assets={availableAssets}
-            />
-            {form.formState.errors.assetTicker && (
-              <p className="text-xs text-red-500 mt-1">{form.formState.errors.assetTicker.message}</p>
+            <Label htmlFor="amount">Depositing</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                id="amount"
+                type="number"
+                step="any"
+                placeholder="Amount"
+                {...form.register("amount")}
+              />
+              <AssetCombobox
+                value={form.watch("assetTicker")}
+                onValueChange={(v: string) => form.setValue("assetTicker", v)}
+                placeholder="Asset"
+                assets={availableAssets}
+              />
+            </div>
+            {(form.formState.errors.amount || form.formState.errors.assetTicker) && (
+              <p className="text-xs text-red-500 mt-1">
+                {form.formState.errors.amount?.message || form.formState.errors.assetTicker?.message}
+              </p>
             )}
           </div>
-          <div>
-            <Label htmlFor="amount">Amount</Label>
-            <Input
-              id="amount"
-              type="number"
-              step="any"
-              placeholder="0.00"
-              {...form.register("amount")}
-            />
-            {form.formState.errors.amount && (
-              <p className="text-xs text-red-500 mt-1">{form.formState.errors.amount.message}</p>
-            )}
-          </div>
+
           <div>
             <Label htmlFor="usdPrice">Price (USD)</Label>
             <Input

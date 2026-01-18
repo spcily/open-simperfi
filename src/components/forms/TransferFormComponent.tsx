@@ -35,14 +35,6 @@ export function TransferFormComponent({ onSuccess }: { onSuccess: () => void }) 
   const [availableAssets, setAvailableAssets] = React.useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  React.useEffect(() => {
-    db.accounts.toArray().then(setAccounts);
-    db.ledger.toArray().then((entries) => {
-      const uniqueTickers = [...new Set(entries.map(e => e.assetTicker))].sort();
-      setAvailableAssets(uniqueTickers);
-    });
-  }, []);
-
   const form = useForm<TransferFormValues>({
     resolver: zodResolver(transferSchema),
     defaultValues: {
@@ -54,6 +46,24 @@ export function TransferFormComponent({ onSuccess }: { onSuccess: () => void }) 
       notes: "",
     },
   });
+
+  // Load data and auto-select first account as source
+  React.useEffect(() => {
+    const loadData = async () => {
+      const accountsList = await db.accounts.toArray();
+      setAccounts(accountsList);
+
+      // Auto-select first account for "From Account"
+      if (accountsList.length > 0 && accountsList[0].id) {
+        form.setValue("accountId", String(accountsList[0].id));
+      }
+
+      const entries = await db.ledger.toArray();
+      const uniqueTickers = [...new Set(entries.map(e => e.assetTicker))].sort();
+      setAvailableAssets(uniqueTickers);
+    };
+    loadData();
+  }, [form]);
 
   const onSubmit = async (data: TransferFormValues) => {
     setIsSubmitting(true);
@@ -152,32 +162,28 @@ export function TransferFormComponent({ onSuccess }: { onSuccess: () => void }) 
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="assetTicker">Asset</Label>
-            <AssetCombobox
-              value={form.watch("assetTicker")}
-              onValueChange={(v: string) => form.setValue("assetTicker", v)}
-              placeholder="e.g. BTC"
-              assets={availableAssets}
-            />
-            {form.formState.errors.assetTicker && (
-              <p className="text-xs text-red-500 mt-1">{form.formState.errors.assetTicker.message}</p>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="amount">Amount</Label>
+        <div>
+          <Label htmlFor="amount">Transferring</Label>
+          <div className="grid grid-cols-2 gap-2">
             <Input
               id="amount"
               type="number"
               step="any"
-              placeholder="0.00"
+              placeholder="Amount"
               {...form.register("amount")}
             />
-            {form.formState.errors.amount && (
-              <p className="text-xs text-red-500 mt-1">{form.formState.errors.amount.message}</p>
-            )}
+            <AssetCombobox
+              value={form.watch("assetTicker")}
+              onValueChange={(v: string) => form.setValue("assetTicker", v)}
+              placeholder="Asset"
+              assets={availableAssets}
+            />
           </div>
+          {(form.formState.errors.amount || form.formState.errors.assetTicker) && (
+            <p className="text-xs text-red-500 mt-1">
+              {form.formState.errors.amount?.message || form.formState.errors.assetTicker?.message}
+            </p>
+          )}
         </div>
       </div>
 

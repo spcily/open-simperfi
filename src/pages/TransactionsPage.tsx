@@ -19,7 +19,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { TradeFormComponent } from '@/components/forms/TradeFormComponent';
+import { BuyFormComponent } from '@/components/forms/BuyFormComponent';
+import { SellFormComponent } from '@/components/forms/SellFormComponent';
 import { DepositFormComponent } from '@/components/forms/DepositFormComponent';
 import { WithdrawFormComponent } from '@/components/forms/WithdrawFormComponent';
 import { TransferFormComponent } from '@/components/forms/TransferFormComponent';
@@ -30,7 +31,8 @@ interface EnrichedTrade extends Trade {
 
 export default function TransactionsPage() {
   const [trades, setTrades] = useState<EnrichedTrade[]>([]);
-  const [isTradeDialogOpen, setIsTradeDialogOpen] = useState(false);
+  const [isBuyDialogOpen, setIsBuyDialogOpen] = useState(false);
+  const [isSellDialogOpen, setIsSellDialogOpen] = useState(false);
   const [isDepositDialogOpen, setIsDepositDialogOpen] = useState(false);
   const [isWithdrawDialogOpen, setIsWithdrawDialogOpen] = useState(false);
   const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
@@ -76,7 +78,8 @@ export default function TransactionsPage() {
   };
 
   const handleSuccess = () => {
-    setIsTradeDialogOpen(false);
+    setIsBuyDialogOpen(false);
+    setIsSellDialogOpen(false);
     setIsDepositDialogOpen(false);
     setIsWithdrawDialogOpen(false);
     setIsTransferDialogOpen(false);
@@ -126,18 +129,34 @@ export default function TransactionsPage() {
         <h1 className="text-2xl sm:text-3xl font-bold">Transactions</h1>
         
         <div className="flex gap-2 flex-wrap">
-          <Dialog open={isTradeDialogOpen} onOpenChange={setIsTradeDialogOpen}>
+          <Dialog open={isBuyDialogOpen} onOpenChange={setIsBuyDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">
-                <Plus className="mr-2 h-4 w-4" /> Trade
+                <Plus className="mr-2 h-4 w-4" /> Buy
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[700px] max-w-[95vw] flex flex-col p-0">
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
               <DialogHeader className="px-6 pt-6 pb-4">
-                <DialogTitle>Add Trade</DialogTitle>
+                <DialogTitle>Add Buy Order</DialogTitle>
               </DialogHeader>
               <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
-                <TradeFormComponent onSuccess={handleSuccess} />
+                <BuyFormComponent onSuccess={handleSuccess} />
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isSellDialogOpen} onOpenChange={setIsSellDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="mr-2 h-4 w-4" /> Sell
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
+              <DialogHeader className="px-6 pt-6 pb-4">
+                <DialogTitle>Add Sell Order</DialogTitle>
+              </DialogHeader>
+              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
+                <SellFormComponent onSuccess={handleSuccess} />
               </div>
             </DialogContent>
           </Dialog>

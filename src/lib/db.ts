@@ -40,7 +40,7 @@ const slugify = (label: string) => {
 
 const nowIso = () => new Date().toISOString();
 
-export type TransactionType = 'deposit' | 'withdraw' | 'trade' | 'transfer';
+export type TransactionType = 'deposit' | 'withdraw' | 'trade' | 'transfer' | 'buy' | 'sell';
 
 export interface Account {
   id?: number;
@@ -53,6 +53,9 @@ export interface Trade {
   date: Date;
   type: TransactionType;
   notes?: string;
+  pair?: string; // Trading pair like "ETH/USDC" or "SOL/USDT"
+  pairPrice?: number; // Price of the pair (e.g., ETH price in USDC)
+  actualPrice?: number; // For sell orders: inverse price (1/pairPrice)
 }
 
 export interface LedgerEntry {
