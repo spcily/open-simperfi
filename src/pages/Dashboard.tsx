@@ -151,6 +151,38 @@ const calculateHoldings = (
     return results.sort((a, b) => a.ticker.localeCompare(b.ticker));
 };
 
+// Calculate realized PnL from sell trades
+const calculateRealizedPnL = (
+    ledger: LedgerEntry[] = [],
+    trades: Trade[] = [],
+): number => {
+    if (!ledger.length || !trades.length) return 0;
+
+    let totalRealizedPnL = 0;
+
+    // Find all sell trades
+    const sellTrades = trades.filter((t) => t.type === "sell");
+
+    sellTrades.forEach((trade) => {
+        // Get ledger entries for this sell trade
+        const tradeEntries = ledger.filter((e) => e.tradeId === trade.id);
+
+        // Find the negative (sold asset) and positive (received currency) entries
+        const soldEntry = tradeEntries.find((e) => e.amount < 0);
+        const receivedEntry = tradeEntries.find((e) => e.amount > 0);
+
+        if (soldEntry && receivedEntry && soldEntry.usdPriceAtTime) {
+            const soldAmount = Math.abs(soldEntry.amount);
+            const costBasis = soldAmount * soldEntry.usdPriceAtTime;
+            const proceeds = receivedEntry.amount * (receivedEntry.usdPriceAtTime || 1);
+            const pnl = proceeds - costBasis;
+            totalRealizedPnL += pnl;
+        }
+    });
+
+    return totalRealizedPnL;
+};
+
 // Calculate portfolio value at each transaction date over the last 30 days
 const calculatePortfolioHistory = (
     ledger: LedgerEntry[] = [],
@@ -481,6 +513,22 @@ export default function Dashboard() {
         return calculatePortfolioHistory(ledger, trades, transferTradeIds);
     }, [ledger, trades, transferTradeIds]);
 
+    // Calculate realized PnL
+    const realizedPnL = React.useMemo(() => {
+        if (!ledger || !trades) return 0;
+        return calculateRealizedPnL(ledger, trades);
+    }, [ledger, trades]);
+
+    // Calculate 30-day change
+    const thirtyDayChange = React.useMemo(() => {
+        if (portfolioHistoryData.length < 2) return { amount: 0, percent: 0 };
+        const firstValue = portfolioHistoryData[0].value;
+        const lastValue = portfolioHistoryData[portfolioHistoryData.length - 1].value;
+        const changeAmount = lastValue - firstValue;
+        const changePercent = firstValue > 0 ? (changeAmount / firstValue) * 100 : 0;
+        return { amount: changeAmount, percent: changePercent };
+    }, [portfolioHistoryData]);
+
     return (
         <div className="container mx-auto p-4 space-y-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
@@ -677,6 +725,78 @@ export default function Dashboard() {
                         )}
                     </CardContent>
                 </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">
+                            Realized PnL
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {hasSnapshot ? (
+                            <>
+                                <div
+                                    className={cn(
+                                        "text-2xl font-bold",
+                                        realizedPnL >= 0
+                                            ? "text-green-600 dark:text-green-400"
+                                            : "text-red-500 dark:text-red-400",
+                                    )}
+                                >
+                                    {realizedPnL > 0 ? "+" : ""}
+                                    {formatCurrency(realizedPnL)}
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    From sell orders
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <Skeleton className="h-8 w-32 mb-2" />
+                                <Skeleton className="h-4 w-20" />
+                            </>
+                        )}
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">
+                            30-Day Change
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {hasSnapshot ? (
+                            <>
+                                <div
+                                    className={cn(
+                                        "text-2xl font-bold",
+                                        thirtyDayChange.amount >= 0
+                                            ? "text-green-600 dark:text-green-400"
+                                            : "text-red-500 dark:text-red-400",
+                                    )}
+                                >
+                                    {thirtyDayChange.amount > 0 ? "+" : ""}
+                                    {formatCurrency(thirtyDayChange.amount)}
+                                </div>
+                                <p
+                                    className={cn(
+                                        "text-xs mt-1",
+                                        thirtyDayChange.percent >= 0
+                                            ? "text-green-600 dark:text-green-400"
+                                            : "text-red-500 dark:text-red-400",
+                                    )}
+                                >
+                                    {thirtyDayChange.percent > 0 ? "+" : ""}
+                                    {thirtyDayChange.percent.toFixed(2)}%
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <Skeleton className="h-8 w-32 mb-2" />
+                                <Skeleton className="h-4 w-20" />
+                            </>
+                        )}
+                    </CardContent>
+                </Card>
             </div>
 
             {/* Charts Row */}
@@ -830,7 +950,7 @@ export default function Dashboard() {
                                                 fill: "hsl(var(--muted-foreground))",
                                             }}
                                             tickFormatter={(value) =>
-                                                `$${(value / 1000).toFixed(0)}k`
+                                                formatCurrency(value)
                                             }
                                         />
                                         <Tooltip

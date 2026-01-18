@@ -2,7 +2,7 @@
 
 This document provides AI assistants with comprehensive guidelines for working on the OpenSimperfi codebase.
 
-**Stack**: React + Vite + TypeScript + Tailwind CSS + shadcn/ui + Dexie.js
+**Stack**: React + Vite + TypeScript + Tailwind CSS + shadcn/ui + Dexie.js + Recharts
 
 ## Build, Lint & Test Commands
 
@@ -73,8 +73,8 @@ const calculateHoldings = (entries: any) => { ... };  // No any
 
 ### Naming Conventions
 
-- **Components**: PascalCase (`TradeForm`, `Dashboard`)
-- **Files**: Match component name (`TradeForm.tsx`, `Dashboard.tsx`)
+- **Components**: PascalCase (`BuyFormComponent`, `Dashboard`)
+- **Files**: Match component name (`BuyFormComponent.tsx`, `Dashboard.tsx`)
 - **Hooks**: camelCase with `use` prefix (`useLivePrices`, `useAccountBalance`)
 - **Utilities**: camelCase (`formatCurrency`, `calculateHoldings`)
 - **Constants**: UPPER_SNAKE_CASE (`DB_LIST_KEY`, `DEFAULT_DB_ID`)
@@ -170,15 +170,37 @@ npx shadcn@latest add card dialog input
 - **Live Queries**: Prefer `useLiveQuery()` for reactive data over manual state updates
 - **Indexes**: Defined in `src/lib/db.ts` schema
 
+### Trading Pair System
+- **Pair Format**: `"BASE/QUOTE"` (e.g., "ETH/USDC", "BTC/USDT")
+- **Price Storage**: 
+  - Buy: `pairPrice` = quote per base (e.g., 3000 USDC per ETH)
+  - Sell: `pairPrice` = quote per base, `actualPrice` = inverse (1/pairPrice)
+- **Auto-Fetching**: Prices auto-fetch from Binance when both assets selected
+- **Stablecoins**: Detected and auto-selected (USDT, USDC, BUSD, DAI, etc.)
+
+### Transaction Forms
+- **5 Separate Forms**: Buy, Sell, Deposit, Withdraw, Transfer
+- **Inline Layouts**: Amount + asset in 2-column grid
+  ```tsx
+  <div className="grid grid-cols-2 gap-2">
+    <Input placeholder="Amount" />
+    <AssetCombobox placeholder="Asset" />
+  </div>
+  ```
+- **Responsive**: Use `grid-cols-1 md:grid-cols-2` for desktop side-by-side
+- **Auto-Selection**: First account always auto-selected on load
+
 ### Responsive Design
 - **Dual Layouts**: Desktop tables (`hidden md:table`) + Mobile cards (`md:hidden`)
 - **No Horizontal Scroll**: Never rely on horizontal scrolling on mobile
 - **Touch Targets**: Minimum 44x44px for buttons on mobile
+- **Breakpoint**: 768px (md:) for desktop/mobile split
 
 ### File Organization
 - `/src/lib` - Database, utilities, type definitions
 - `/src/components` - Reusable UI components
 - `/src/components/ui` - shadcn/ui primitives
+- `/src/components/forms` - Transaction form components
 - `/src/pages` - Top-level route components
 - `/src/hooks` - Custom React hooks
 
@@ -189,6 +211,8 @@ npx shadcn@latest add card dialog input
 3. **Dialog Heights**: Must be fixed or content changes cause resize issues
 4. **IndexedDB Limits**: Mobile Safari has storage quotas - warn users if approaching limits
 5. **Type Assertions**: Avoid `as` casts unless absolutely necessary; fix types at source
+6. **Sell Orders**: Always store `actualPrice = 1/pairPrice` for inverse calculations
+7. **Form Dependencies**: Declare form in useForm hook BEFORE using in useEffect
 
 ## When Making Changes
 
@@ -197,8 +221,27 @@ npx shadcn@latest add card dialog input
 3. **Run `npm run build`** before committing to catch type errors
 4. **Check responsive breakpoints** at 640px, 768px, 1024px
 5. **Verify no console errors** in browser DevTools
+6. **Test all 5 transaction forms** if changing form patterns
+7. **Verify chart responsiveness** if modifying Dashboard
+
+## Key Features to Maintain
+
+### Dashboard Metrics (4 Cards)
+1. Total Portfolio Value (with cost basis)
+2. Unrealized PnL (with percentage)
+3. Realized PnL (from sell orders)
+4. 30-Day Change (with percentage)
+
+### Charts
+- Portfolio Value: 30-day line chart with full currency Y-axis labels
+- Asset Allocation: Pie chart with percentages
+
+### Calculations
+- **Holdings**: Weighted-average cost basis from ledger history
+- **Realized PnL**: Sum of (proceeds - cost basis) from all sell trades
+- **30-Day Change**: Compare first and last values in portfolio history
 
 ---
 
-**Last Updated**: 2026-01-16  
+**Last Updated**: 2026-01-18  
 **Version**: 0.1.0
