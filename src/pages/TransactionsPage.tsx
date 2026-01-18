@@ -19,7 +19,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { TradeForm } from '@/components/TradeForm';
+import { TradeFormComponent } from '@/components/forms/TradeFormComponent';
+import { DepositFormComponent } from '@/components/forms/DepositFormComponent';
+import { WithdrawFormComponent } from '@/components/forms/WithdrawFormComponent';
+import { TransferFormComponent } from '@/components/forms/TransferFormComponent';
 
 interface EnrichedTrade extends Trade {
   ledgerEntries: LedgerEntry[];
@@ -27,7 +30,10 @@ interface EnrichedTrade extends Trade {
 
 export default function TransactionsPage() {
   const [trades, setTrades] = useState<EnrichedTrade[]>([]);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isTradeDialogOpen, setIsTradeDialogOpen] = useState(false);
+  const [isDepositDialogOpen, setIsDepositDialogOpen] = useState(false);
+  const [isWithdrawDialogOpen, setIsWithdrawDialogOpen] = useState(false);
+  const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
   const [accounts, setAccounts] = useState<Record<number, string>>({});
 
   const fetchData = async () => {
@@ -70,7 +76,10 @@ export default function TransactionsPage() {
   };
 
   const handleSuccess = () => {
-    setIsDialogOpen(false);
+    setIsTradeDialogOpen(false);
+    setIsDepositDialogOpen(false);
+    setIsWithdrawDialogOpen(false);
+    setIsTransferDialogOpen(false);
     fetchData();
   };
 
@@ -116,22 +125,71 @@ export default function TransactionsPage() {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold">Transactions</h1>
         
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" /> Add Transaction
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[700px] flex flex-col p-0">
-            <DialogHeader className="px-6 pt-6 pb-4">
-              <DialogTitle>Add Transaction</DialogTitle>
-            </DialogHeader>
-            <div className="overflow-y-auto px-6 h-[500px]">
-              {/* Pass generic onSuccess to close and refresh */}
-              <TradeForm onSuccess={handleSuccess} />
-            </div>
-          </DialogContent>
-        </Dialog>
+        <div className="flex gap-2 flex-wrap">
+          <Dialog open={isTradeDialogOpen} onOpenChange={setIsTradeDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="mr-2 h-4 w-4" /> Trade
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[700px] max-w-[95vw] flex flex-col p-0">
+              <DialogHeader className="px-6 pt-6 pb-4">
+                <DialogTitle>Add Trade</DialogTitle>
+              </DialogHeader>
+              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
+                <TradeFormComponent onSuccess={handleSuccess} />
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isDepositDialogOpen} onOpenChange={setIsDepositDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="mr-2 h-4 w-4" /> Deposit
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
+              <DialogHeader className="px-6 pt-6 pb-4">
+                <DialogTitle>Add Deposit</DialogTitle>
+              </DialogHeader>
+              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
+                <DepositFormComponent onSuccess={handleSuccess} />
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isWithdrawDialogOpen} onOpenChange={setIsWithdrawDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="mr-2 h-4 w-4" /> Withdraw
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
+              <DialogHeader className="px-6 pt-6 pb-4">
+                <DialogTitle>Add Withdrawal</DialogTitle>
+              </DialogHeader>
+              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
+                <WithdrawFormComponent onSuccess={handleSuccess} />
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isTransferDialogOpen} onOpenChange={setIsTransferDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="mr-2 h-4 w-4" /> Transfer
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
+              <DialogHeader className="px-6 pt-6 pb-4">
+                <DialogTitle>Add Transfer</DialogTitle>
+              </DialogHeader>
+              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
+                <TransferFormComponent onSuccess={handleSuccess} />
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Card>
