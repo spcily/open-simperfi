@@ -24,6 +24,8 @@ import { SellFormComponent } from '@/components/forms/SellFormComponent';
 import { DepositFormComponent } from '@/components/forms/DepositFormComponent';
 import { WithdrawFormComponent } from '@/components/forms/WithdrawFormComponent';
 import { TransferFormComponent } from '@/components/forms/TransferFormComponent';
+import { GainFormComponent } from '@/components/forms/GainFormComponent';
+import { LossFormComponent } from '@/components/forms/LossFormComponent';
 
 interface EnrichedTrade extends Trade {
   ledgerEntries: LedgerEntry[];
@@ -36,6 +38,8 @@ export default function TransactionsPage() {
   const [isDepositDialogOpen, setIsDepositDialogOpen] = useState(false);
   const [isWithdrawDialogOpen, setIsWithdrawDialogOpen] = useState(false);
   const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
+  const [isGainDialogOpen, setIsGainDialogOpen] = useState(false);
+  const [isLossDialogOpen, setIsLossDialogOpen] = useState(false);
   const [accounts, setAccounts] = useState<Record<number, string>>({});
 
   const fetchData = async () => {
@@ -83,6 +87,8 @@ export default function TransactionsPage() {
     setIsDepositDialogOpen(false);
     setIsWithdrawDialogOpen(false);
     setIsTransferDialogOpen(false);
+    setIsGainDialogOpen(false);
+    setIsLossDialogOpen(false);
     fetchData();
   };
 
@@ -119,6 +125,8 @@ export default function TransactionsPage() {
       switch (type) {
           case 'deposit': return 'default'; // primary
           case 'withdraw': return 'destructive';
+          case 'gain': return 'default'; // primary (like deposit)
+          case 'loss': return 'destructive'; // red (like withdraw)
           default: return 'secondary';
       }
   }
@@ -135,13 +143,11 @@ export default function TransactionsPage() {
                 <Plus className="mr-2 h-4 w-4" /> Buy
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-              <DialogHeader className="px-6 pt-6 pb-4">
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+              <DialogHeader>
                 <DialogTitle>Add Buy Order</DialogTitle>
               </DialogHeader>
-              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
-                <BuyFormComponent onSuccess={handleSuccess} />
-              </div>
+              <BuyFormComponent onSuccess={handleSuccess} />
             </DialogContent>
           </Dialog>
 
@@ -151,13 +157,11 @@ export default function TransactionsPage() {
                 <Plus className="mr-2 h-4 w-4" /> Sell
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-              <DialogHeader className="px-6 pt-6 pb-4">
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+              <DialogHeader>
                 <DialogTitle>Add Sell Order</DialogTitle>
               </DialogHeader>
-              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
-                <SellFormComponent onSuccess={handleSuccess} />
-              </div>
+              <SellFormComponent onSuccess={handleSuccess} />
             </DialogContent>
           </Dialog>
 
@@ -167,13 +171,11 @@ export default function TransactionsPage() {
                 <Plus className="mr-2 h-4 w-4" /> Deposit
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-              <DialogHeader className="px-6 pt-6 pb-4">
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+              <DialogHeader>
                 <DialogTitle>Add Deposit</DialogTitle>
               </DialogHeader>
-              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
-                <DepositFormComponent onSuccess={handleSuccess} />
-              </div>
+              <DepositFormComponent onSuccess={handleSuccess} />
             </DialogContent>
           </Dialog>
 
@@ -183,13 +185,11 @@ export default function TransactionsPage() {
                 <Plus className="mr-2 h-4 w-4" /> Withdraw
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-              <DialogHeader className="px-6 pt-6 pb-4">
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+              <DialogHeader>
                 <DialogTitle>Add Withdrawal</DialogTitle>
               </DialogHeader>
-              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
-                <WithdrawFormComponent onSuccess={handleSuccess} />
-              </div>
+              <WithdrawFormComponent onSuccess={handleSuccess} />
             </DialogContent>
           </Dialog>
 
@@ -199,13 +199,39 @@ export default function TransactionsPage() {
                 <Plus className="mr-2 h-4 w-4" /> Transfer
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-              <DialogHeader className="px-6 pt-6 pb-4">
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+              <DialogHeader>
                 <DialogTitle>Add Transfer</DialogTitle>
               </DialogHeader>
-              <div className="overflow-y-auto px-6 h-[60vh] sm:h-[500px]">
-                <TransferFormComponent onSuccess={handleSuccess} />
-              </div>
+              <TransferFormComponent onSuccess={handleSuccess} />
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isGainDialogOpen} onOpenChange={setIsGainDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="mr-2 h-4 w-4" /> Gain
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+              <DialogHeader>
+                <DialogTitle>Record Gain</DialogTitle>
+              </DialogHeader>
+              <GainFormComponent onSuccess={handleSuccess} />
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isLossDialogOpen} onOpenChange={setIsLossDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="mr-2 h-4 w-4" /> Loss
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+              <DialogHeader>
+                <DialogTitle>Record Loss</DialogTitle>
+              </DialogHeader>
+              <LossFormComponent onSuccess={handleSuccess} />
             </DialogContent>
           </Dialog>
         </div>

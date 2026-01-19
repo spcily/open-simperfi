@@ -26,6 +26,8 @@ import { SellFormComponent } from "@/components/forms/SellFormComponent";
 import { DepositFormComponent } from "@/components/forms/DepositFormComponent";
 import { WithdrawFormComponent } from "@/components/forms/WithdrawFormComponent";
 import { TransferFormComponent } from "@/components/forms/TransferFormComponent";
+import { GainFormComponent } from "@/components/forms/GainFormComponent";
+import { LossFormComponent } from "@/components/forms/LossFormComponent";
 import { formatCurrency, formatCrypto, cn } from "@/lib/utils";
 import {
     Dialog,
@@ -75,8 +77,17 @@ interface DashboardSnapshot {
 // Helper to consolidate ledger entries AND calculate avg buy price
 const calculateHoldings = (
     entries: LedgerEntry[] = [],
+    trades: Trade[] = [],
     transferTradeIds?: Set<number>,
 ): AssetHolding[] => {
+    // Create a map of tradeId -> trade type for quick lookup
+    const tradeTypeMap = new Map<number, string>();
+    trades.forEach((trade) => {
+        if (trade.id !== undefined) {
+            tradeTypeMap.set(trade.id, trade.type);
+        }
+    });
+
     const filteredEntries = transferTradeIds
         ? entries.filter((entry) => {
               if (entry.tradeId === undefined || entry.tradeId === null) {
@@ -106,19 +117,29 @@ const calculateHoldings = (
 
         history.forEach((entry) => {
             const qty = entry.amount;
+            const tradeType = entry.tradeId !== undefined ? tradeTypeMap.get(entry.tradeId) : undefined;
 
             if (qty > 0) {
-                // BUY / RECEIVE
-                // If priceAtTime is missing, we assume 0 cost.
-                const price = entry.usdPriceAtTime || 0;
-                const cost = qty * price;
+                // POSITIVE ENTRY (BUY / RECEIVE / DEPOSIT / GAIN)
+                // Check if this is a "gain" transaction
+                if (tradeType === "gain") {
+                    // Gains don't affect cost basis (cost = $0)
+                    // Just add to quantity, don't add to cost
+                    totalQty += qty;
+                    // Still track last buy price for display (but not for avg calc)
+                    // Don't update lastBuy for gains
+                } else {
+                    // Regular buy/deposit - affects cost basis
+                    const price = entry.usdPriceAtTime || 0;
+                    const cost = qty * price;
 
-                if (price > 0) lastBuy = price;
+                    if (price > 0) lastBuy = price;
 
-                totalCost += cost;
-                totalQty += qty;
+                    totalCost += cost;
+                    totalQty += qty;
+                }
             } else {
-                // SELL / SEND
+                // NEGATIVE ENTRY (SELL / SEND / WITHDRAW / LOSS)
                 // Reduce cost basis proportionally (Weighted Average)
                 const absQty = Math.abs(qty);
                 const avgPrice = totalQty > 0 ? totalCost / totalQty : 0;
@@ -221,6 +242,7 @@ const calculatePortfolioHistory = (
         // Calculate holdings at this point in time
         const holdingsAtDate = calculateHoldings(
             entriesUpToDate,
+            trades,
             transferTradeIds,
         );
 
@@ -272,6 +294,8 @@ export default function Dashboard() {
     const [isDepositModalOpen, setIsDepositModalOpen] = React.useState(false);
     const [isWithdrawModalOpen, setIsWithdrawModalOpen] = React.useState(false);
     const [isTransferModalOpen, setIsTransferModalOpen] = React.useState(false);
+    const [isGainModalOpen, setIsGainModalOpen] = React.useState(false);
+    const [isLossModalOpen, setIsLossModalOpen] = React.useState(false);
     const [isAllocationModalOpen, setIsAllocationModalOpen] =
         React.useState(false);
     const [isPriceDialogOpen, setIsPriceDialogOpen] = React.useState(false);
@@ -326,8 +350,8 @@ export default function Dashboard() {
     }, [trades]);
 
     const holdings = React.useMemo(
-        () => calculateHoldings(ledger || [], transferTradeIds),
-        [ledger, transferTradeIds],
+        () => calculateHoldings(ledger || [], trades || [], transferTradeIds),
+        [ledger, trades, transferTradeIds],
     );
 
     // Derived Array of assets we need prices for
@@ -568,15 +592,13 @@ export default function Dashboard() {
                             <DialogTrigger asChild>
                                 <Button variant="outline">+ Buy</Button>
                             </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-                                <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4">
+                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+                                <DialogHeader>
                                     <DialogTitle>Add Buy Order</DialogTitle>
                                 </DialogHeader>
-                                <div className="overflow-y-auto px-4 sm:px-6 h-[60vh] sm:h-[500px]">
-                                    <BuyFormComponent
-                                        onSuccess={() => setIsBuyModalOpen(false)}
-                                    />
-                                </div>
+                                <BuyFormComponent
+                                    onSuccess={() => setIsBuyModalOpen(false)}
+                                />
                             </DialogContent>
                         </Dialog>
 
@@ -587,15 +609,13 @@ export default function Dashboard() {
                             <DialogTrigger asChild>
                                 <Button variant="outline">+ Sell</Button>
                             </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-                                <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4">
+                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+                                <DialogHeader>
                                     <DialogTitle>Add Sell Order</DialogTitle>
                                 </DialogHeader>
-                                <div className="overflow-y-auto px-4 sm:px-6 h-[60vh] sm:h-[500px]">
-                                    <SellFormComponent
-                                        onSuccess={() => setIsSellModalOpen(false)}
-                                    />
-                                </div>
+                                <SellFormComponent
+                                    onSuccess={() => setIsSellModalOpen(false)}
+                                />
                             </DialogContent>
                         </Dialog>
 
@@ -606,15 +626,13 @@ export default function Dashboard() {
                             <DialogTrigger asChild>
                                 <Button variant="outline">+ Deposit</Button>
                             </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-                                <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4">
+                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+                                <DialogHeader>
                                     <DialogTitle>Add Deposit</DialogTitle>
                                 </DialogHeader>
-                                <div className="overflow-y-auto px-4 sm:px-6 h-[60vh] sm:h-[500px]">
-                                    <DepositFormComponent
-                                        onSuccess={() => setIsDepositModalOpen(false)}
-                                    />
-                                </div>
+                                <DepositFormComponent
+                                    onSuccess={() => setIsDepositModalOpen(false)}
+                                />
                             </DialogContent>
                         </Dialog>
 
@@ -625,15 +643,13 @@ export default function Dashboard() {
                             <DialogTrigger asChild>
                                 <Button variant="outline">+ Withdraw</Button>
                             </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-                                <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4">
+                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+                                <DialogHeader>
                                     <DialogTitle>Add Withdrawal</DialogTitle>
                                 </DialogHeader>
-                                <div className="overflow-y-auto px-4 sm:px-6 h-[60vh] sm:h-[500px]">
-                                    <WithdrawFormComponent
-                                        onSuccess={() => setIsWithdrawModalOpen(false)}
-                                    />
-                                </div>
+                                <WithdrawFormComponent
+                                    onSuccess={() => setIsWithdrawModalOpen(false)}
+                                />
                             </DialogContent>
                         </Dialog>
 
@@ -644,15 +660,47 @@ export default function Dashboard() {
                             <DialogTrigger asChild>
                                 <Button variant="outline">+ Transfer</Button>
                             </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw] flex flex-col p-0">
-                                <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4">
+                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+                                <DialogHeader>
                                     <DialogTitle>Add Transfer</DialogTitle>
                                 </DialogHeader>
-                                <div className="overflow-y-auto px-4 sm:px-6 h-[60vh] sm:h-[500px]">
-                                    <TransferFormComponent
-                                        onSuccess={() => setIsTransferModalOpen(false)}
-                                    />
-                                </div>
+                                <TransferFormComponent
+                                    onSuccess={() => setIsTransferModalOpen(false)}
+                                />
+                            </DialogContent>
+                        </Dialog>
+
+                        <Dialog
+                            open={isGainModalOpen}
+                            onOpenChange={setIsGainModalOpen}
+                        >
+                            <DialogTrigger asChild>
+                                <Button variant="outline">+ Gain</Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+                                <DialogHeader>
+                                    <DialogTitle>Record Gain</DialogTitle>
+                                </DialogHeader>
+                                <GainFormComponent
+                                    onSuccess={() => setIsGainModalOpen(false)}
+                                />
+                            </DialogContent>
+                        </Dialog>
+
+                        <Dialog
+                            open={isLossModalOpen}
+                            onOpenChange={setIsLossModalOpen}
+                        >
+                            <DialogTrigger asChild>
+                                <Button variant="outline">+ Loss</Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
+                                <DialogHeader>
+                                    <DialogTitle>Record Loss</DialogTitle>
+                                </DialogHeader>
+                                <LossFormComponent
+                                    onSuccess={() => setIsLossModalOpen(false)}
+                                />
                             </DialogContent>
                         </Dialog>
                     </div>
@@ -1241,22 +1289,21 @@ export default function Dashboard() {
                                                                 / {targetPct}%
                                                             </span>
                                                         </span>
-                                                        {targetPct > 0 && (
+                                                        {targetPct > 0 && diff !== 0 && (
                                                             <span
                                                                 className={cn(
                                                                     "text-xs",
                                                                     diff > 0
-                                                                        ? "text-green-500 dark:text-green-400"
-                                                                        : "text-red-500 dark:text-red-400",
+                                                                        ? "text-amber-600 dark:text-amber-400"
+                                                                        : "text-blue-500 dark:text-blue-400",
                                                                 )}
                                                             >
-                                                                {diff > 0
-                                                                    ? "+"
-                                                                    : ""}
-                                                                {diff.toFixed(
-                                                                    1,
+                                                                {diff > 0 ? ">" : "<"}{" "}
+                                                                {Math.abs(diff).toFixed(1)}%
+                                                                {" ("}                                                                {formatCrypto(
+                                                                    (Math.abs(diff) / 100) * totals.totalValue / price
                                                                 )}
-                                                                %
+                                                                {" "}{h.ticker})
                                                             </span>
                                                         )}
                                                     </div>
@@ -1375,23 +1422,21 @@ export default function Dashboard() {
                                                         <span className="font-medium">
                                                             {targetPct}%
                                                         </span>
-                                                        {targetPct > 0 && (
+                                                        {targetPct > 0 && diff !== 0 && (
                                                             <span
                                                                 className={cn(
                                                                     "text-xs ml-1",
                                                                     diff > 0
-                                                                        ? "text-green-500 dark:text-green-400"
-                                                                        : "text-red-500 dark:text-red-400",
+                                                                        ? "text-amber-600 dark:text-amber-400"
+                                                                        : "text-blue-500 dark:text-blue-400",
                                                                 )}
                                                             >
-                                                                (
-                                                                {diff > 0
-                                                                    ? "+"
-                                                                    : ""}
-                                                                {diff.toFixed(
-                                                                    1,
+                                                                ({diff > 0 ? ">" : "<"}{" "}
+                                                                {Math.abs(diff).toFixed(1)}%
+                                                                {" "}                                                                {formatCrypto(
+                                                                    (Math.abs(diff) / 100) * totals.totalValue / price
                                                                 )}
-                                                                %)
+                                                                {" "}{h.ticker})
                                                             </span>
                                                         )}
                                                     </div>

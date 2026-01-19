@@ -40,7 +40,7 @@ const slugify = (label: string) => {
 
 const nowIso = () => new Date().toISOString();
 
-export type TransactionType = 'deposit' | 'withdraw' | 'trade' | 'transfer' | 'buy' | 'sell';
+export type TransactionType = 'deposit' | 'withdraw' | 'trade' | 'transfer' | 'buy' | 'sell' | 'gain' | 'loss';
 
 export interface Account {
   id?: number;
