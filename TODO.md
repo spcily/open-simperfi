@@ -17,7 +17,7 @@
 - [x] **Inline Form Layouts** – Amount and asset displayed side-by-side for natural readability (e.g., "1.5 ETH").
 - [x] **Responsive Form Grids** – Trading forms adapt: 2-column on desktop, stacked on mobile.
 - [x] **Auto-Account Selection** – First account auto-selected in all transaction forms.
-- [x] **Portfolio Value Chart** – 30-day historical chart with full value Y-axis labels (not "1k 1k").
+- [x] **Portfolio Value Chart** – 30-day historical chart using daily closing prices from Binance API, with timezone-aware date alignment, forward-fill pricing for missing data, full currency Y-axis labels, live price integration for today, and optimized rendering to prevent flickering.
 - [x] **Realized PnL Card** – Track total profit/loss from completed sell orders.
 - [x] **30-Day Change Card** – Show portfolio performance over last 30 days with percentage.
 

@@ -54,6 +54,64 @@ import {
     CartesianGrid,
 } from "recharts";
 
+// Memoized Portfolio Value Chart to prevent flickering
+const PortfolioValueChart = React.memo(({ data }: { data: { date: string; value: number }[] }) => (
+    <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={data}>
+            <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="hsl(var(--border))"
+            />
+            <XAxis
+                dataKey="date"
+                stroke="hsl(var(--foreground))"
+                tick={{
+                    fill: "hsl(var(--muted-foreground))",
+                }}
+                tickFormatter={(date) => {
+                    const d = new Date(date);
+                    return `${d.getMonth() + 1}/${d.getDate()}`;
+                }}
+            />
+            <YAxis
+                stroke="hsl(var(--foreground))"
+                tick={{
+                    fill: "hsl(var(--muted-foreground))",
+                }}
+                tickFormatter={(value) =>
+                    formatCurrency(value)
+                }
+            />
+            <Tooltip
+                formatter={(value: number) => [
+                    formatCurrency(value),
+                    "Portfolio Value",
+                ]}
+                labelFormatter={(label) =>
+                    new Date(
+                        label,
+                    ).toLocaleDateString()
+                }
+                contentStyle={{
+                    backgroundColor:
+                        "hsl(var(--background))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: "6px",
+                    color: "hsl(var(--foreground))",
+                }}
+            />
+            <Line
+                type="monotone"
+                dataKey="value"
+                stroke="#3b82f6"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 6 }}
+            />
+        </LineChart>
+    </ResponsiveContainer>
+));
+
 // Extended type for View
 interface AssetHolding {
     ticker: string;
@@ -204,13 +262,96 @@ const calculateRealizedPnL = (
     return totalRealizedPnL;
 };
 
-// Calculate portfolio value at each transaction date over the last 30 days
-const calculatePortfolioHistory = (
+// Cache for historical prices to avoid repeated API calls
+const historicalPriceCache = new Map<string, { data: Record<string, number>; timestamp: number }>();
+const CACHE_DURATION = 1000 * 60 * 60; // 1 hour
+
+// Fetch historical daily closing prices from Binance
+const fetchHistoricalPrices = async (
+    symbols: string[],
+    days: number = 30,
+): Promise<Record<string, Record<string, number>>> => {
+    const results: Record<string, Record<string, number>> = {};
+
+    // Get date range
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - days);
+
+    // Format dates for Binance API (milliseconds timestamp)
+    const startTime = startDate.getTime();
+    const endTime = endDate.getTime();
+
+    // Create cache key based on symbols and date range
+    const cacheKey = `${symbols.sort().join(',')}_${startTime}_${endTime}`;
+
+    // Check cache first
+    const cached = historicalPriceCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+        return { [symbols[0]]: cached.data }; // Simplified for single symbol case
+    }
+
+    // Fetch historical data for each symbol
+    const promises = symbols.map(async (symbol) => {
+        try {
+            // Use Binance klines endpoint for daily data
+            const response = await fetch(
+                `https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=1d&startTime=${startTime}&endTime=${endTime}&limit=31`
+            );
+
+            if (!response.ok) {
+                console.warn(`Binance API error for ${symbol}: ${response.status}`);
+                return;
+            }
+
+            const klines = await response.json();
+            const priceData: Record<string, number> = {};
+
+            klines.forEach((kline: any[]) => {
+                // Kline format: [openTime, open, high, low, close, volume, closeTime, ...]
+                const timestamp = kline[0];
+                const closePrice = parseFloat(kline[4]);
+
+                if (!isNaN(closePrice) && closePrice > 0) {
+                    // Convert UTC timestamp to local date for proper timezone alignment
+                    const utcDate = new Date(timestamp);
+                    const localDate = new Date(utcDate.getTime() - (utcDate.getTimezoneOffset() * 60000));
+                    const dateStr = localDate.toISOString().split('T')[0];
+                    priceData[dateStr] = closePrice;
+                }
+            });
+
+            results[symbol] = priceData;
+
+            // Cache successful results
+            historicalPriceCache.set(`${symbol}_${startTime}_${endTime}`, {
+                data: priceData,
+                timestamp: Date.now()
+            });
+
+        } catch (error) {
+            console.warn(`Failed to fetch historical prices for ${symbol}:`, error);
+        }
+    });
+
+    await Promise.all(promises);
+    return results;
+};
+
+// Calculate portfolio value using daily closing prices for smoother charts
+const calculatePortfolioHistory = async (
     ledger: LedgerEntry[] = [],
     trades: Trade[] = [],
     transferTradeIds: Set<number>,
-): { date: string; value: number }[] => {
+    livePrices: Record<string, number> = {},
+): Promise<{ date: string; value: number }[]> => {
     if (!ledger.length) return [];
+
+    // Get all unique assets in the portfolio
+    const uniqueAssets = [...new Set(ledger.map(e => e.assetTicker))];
+
+    // Fetch historical prices for all assets
+    const historicalPrices = await fetchHistoricalPrices(uniqueAssets, 30);
 
     // Get date 30 days ago
     const today = new Date();
@@ -246,27 +387,64 @@ const calculatePortfolioHistory = (
             transferTradeIds,
         );
 
-        // Calculate total value using prices from the ledger entries at that time
+        // Calculate total value using historical or live prices
         let totalValue = 0;
-        holdingsAtDate.forEach((holding) => {
-            // Use the last known price for this asset from ledger entries up to this date
-            const relevantEntries = entriesUpToDate.filter(
-                (e) =>
-                    e.assetTicker === holding.ticker &&
-                    e.amount > 0 &&
-                    e.usdPriceAtTime,
-            );
-            const lastPrice =
-                relevantEntries.length > 0
-                    ? relevantEntries[relevantEntries.length - 1]
-                          .usdPriceAtTime || 0
-                    : 0;
+        const dateStr = currentDate.toISOString().split('T')[0];
+        const isToday = dateStr === today.toISOString().split('T')[0];
 
-            totalValue += holding.amount * lastPrice;
+        holdingsAtDate.forEach((holding) => {
+            let price = 0;
+
+            if (isToday) {
+                // Use live price for today
+                price = livePrices[holding.ticker] || 0;
+            } else {
+                // Use historical closing price for past dates
+                const assetPrices = historicalPrices[holding.ticker];
+                if (assetPrices && assetPrices[dateStr]) {
+                    price = assetPrices[dateStr];
+                } else {
+                    // Forward-fill approach: find the most recent price before this date
+                    let fallbackPrice = 0;
+
+                    if (assetPrices) {
+                        // Get all available dates for this asset, sorted chronologically
+                        const availableDates = Object.keys(assetPrices)
+                            .filter(date => assetPrices[date] > 0)
+                            .sort(); // Oldest first
+
+                        // Find the most recent date that is on or before our target date
+                        for (let i = availableDates.length - 1; i >= 0; i--) {
+                            const availableDate = availableDates[i];
+                            if (availableDate <= dateStr) {
+                                fallbackPrice = assetPrices[availableDate];
+                                break;
+                            }
+                        }
+                    }
+
+                    // If no historical price found, use the last known price from ledger entries
+                    if (fallbackPrice === 0) {
+                        const relevantEntries = entriesUpToDate.filter(
+                            (e) =>
+                                e.assetTicker === holding.ticker &&
+                                e.amount > 0 &&
+                                e.usdPriceAtTime,
+                        );
+                        fallbackPrice = relevantEntries.length > 0
+                            ? relevantEntries[relevantEntries.length - 1].usdPriceAtTime || 0
+                            : 0;
+                    }
+
+                    price = fallbackPrice;
+                }
+            }
+
+            totalValue += holding.amount * price;
         });
 
         history.push({
-            date: currentDate.toISOString().split("T")[0],
+            date: dateStr,
             value: totalValue,
         });
     });
@@ -532,10 +710,39 @@ export default function Dashboard() {
             .filter((item) => item.value > 0);
     }, [hasSnapshot, displayedHoldings, totals.totalValue]);
 
-    const portfolioHistoryData = React.useMemo(() => {
-        if (!ledger || !trades || !transferTradeIds) return [];
-        return calculatePortfolioHistory(ledger, trades, transferTradeIds);
-    }, [ledger, trades, transferTradeIds]);
+    const [portfolioHistoryData, setPortfolioHistoryData] = React.useState<{ date: string; value: number }[]>([]);
+    const [isHistoryLoading, setIsHistoryLoading] = React.useState(false);
+
+    // Calculate portfolio history - recalculate when ledger/trades change or when live prices become available
+    React.useEffect(() => {
+        if (!ledger || !trades || !transferTradeIds) {
+            setPortfolioHistoryData([]);
+            return;
+        }
+
+        // Only show loading on initial load, not on price updates
+        const shouldShowLoading = !portfolioHistoryData.length;
+        if (shouldShowLoading) {
+            setIsHistoryLoading(true);
+        }
+
+        const calculateHistory = async () => {
+            try {
+        // Use available live prices (empty object if not yet loaded)
+        const history = await calculatePortfolioHistory(ledger, trades, transferTradeIds, prices || {});
+        setPortfolioHistoryData(history);
+            } catch (error) {
+                console.error('Failed to calculate portfolio history:', error);
+                setPortfolioHistoryData([]);
+            } finally {
+                if (shouldShowLoading) {
+                    setIsHistoryLoading(false);
+                }
+            }
+        };
+
+        calculateHistory();
+    }, [ledger, trades, transferTradeIds, prices]);
 
     // Calculate realized PnL
     const realizedPnL = React.useMemo(() => {
@@ -974,61 +1181,15 @@ export default function Dashboard() {
                             </CardTitle>
                         </CardHeader>
                         <CardContent>
-                            {portfolioHistoryData.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <LineChart data={portfolioHistoryData}>
-                                        <CartesianGrid
-                                            strokeDasharray="3 3"
-                                            stroke="hsl(var(--border))"
-                                        />
-                                        <XAxis
-                                            dataKey="date"
-                                            stroke="hsl(var(--foreground))"
-                                            tick={{
-                                                fill: "hsl(var(--muted-foreground))",
-                                            }}
-                                            tickFormatter={(date) => {
-                                                const d = new Date(date);
-                                                return `${d.getMonth() + 1}/${d.getDate()}`;
-                                            }}
-                                        />
-                                        <YAxis
-                                            stroke="hsl(var(--foreground))"
-                                            tick={{
-                                                fill: "hsl(var(--muted-foreground))",
-                                            }}
-                                            tickFormatter={(value) =>
-                                                formatCurrency(value)
-                                            }
-                                        />
-                                        <Tooltip
-                                            formatter={(value: number) => [
-                                                formatCurrency(value),
-                                                "Value",
-                                            ]}
-                                            labelFormatter={(label) =>
-                                                new Date(
-                                                    label,
-                                                ).toLocaleDateString()
-                                            }
-                                            contentStyle={{
-                                                backgroundColor:
-                                                    "hsl(var(--background))",
-                                                border: "1px solid hsl(var(--border))",
-                                                borderRadius: "6px",
-                                                color: "hsl(var(--foreground))",
-                                            }}
-                                        />
-                                        <Line
-                                            type="monotone"
-                                            dataKey="value"
-                                            stroke="#3b82f6"
-                                            strokeWidth={2}
-                                            dot={false}
-                                            activeDot={{ r: 6 }}
-                                        />
-                                    </LineChart>
-                                </ResponsiveContainer>
+                            {isHistoryLoading ? (
+                                <div className="h-[300px] flex items-center justify-center">
+                                    <div className="text-center">
+                                        <Skeleton className="h-4 w-32 mx-auto mb-2" />
+                                        <Skeleton className="h-4 w-24 mx-auto" />
+                                    </div>
+                                </div>
+                            ) : portfolioHistoryData.length > 0 ? (
+                                <PortfolioValueChart data={portfolioHistoryData} />
                             ) : (
                                 <div className="h-[300px] flex items-center justify-center text-muted-foreground">
                                     No transaction history in the last 30 days

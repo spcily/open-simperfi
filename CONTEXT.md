@@ -75,7 +75,7 @@ OpenSimperfi is the open-source, privacy-focused edition of the Simperfi portfol
 - **Manual Overrides** – Users can override any ticker price (Settings or inline on the Dashboard). Overridden symbols are excluded from the socket subscription until cleared.
 
 ### Charts & Visualization
-- **Portfolio Value Chart** – 30-day historical line chart with full currency values on Y-axis
+- **Portfolio Value Chart** – 30-day historical line chart using daily closing prices from Binance API for smooth, professional charts with full currency values on Y-axis
 - **Asset Allocation Chart** – Pie chart showing current portfolio distribution by asset
 
 ### Privacy

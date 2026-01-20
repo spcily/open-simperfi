@@ -15,7 +15,7 @@ OpenSimperfi allows you to track your crypto assets without sending your data to
 - **Live & Manual Pricing** – Binance WebSocket miniTickers keep quotes in sync, while manual overrides let you hardcode prices for obscure tickers.
 - **Comprehensive Dashboard** – 
   - Holdings table with balance, price, avg buy, last buy delta, unrealized PnL, and allocation vs target
-  - Portfolio value chart (30-day history with clear full-value Y-axis labels)
+  - Portfolio value chart (30-day history using daily closing prices from Binance API with live price integration)
   - 4 metric cards: Total Value, Unrealized PnL, Realized PnL, 30-Day Change
 - **Portfolio Targets** – Define desired percentage per asset and monitor drift.
 - **Database Management** – Create, clone, select, and delete isolated Dexie databases for experiments or multiple portfolios.

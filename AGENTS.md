@@ -233,7 +233,7 @@ npx shadcn@latest add card dialog input
 4. 30-Day Change (with percentage)
 
 ### Charts
-- Portfolio Value: 30-day line chart with full currency Y-axis labels
+- Portfolio Value: 30-day line chart with full currency Y-axis labels, historical closing prices with timezone-aware date alignment, forward-fill pricing for missing data, live price integration for today, and optimized rendering to prevent flickering
 - Asset Allocation: Pie chart with percentages
 
 ### Calculations
