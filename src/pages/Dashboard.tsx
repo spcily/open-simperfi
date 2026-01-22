@@ -6,6 +6,7 @@ import {
     Trade,
     TargetAllocation,
     AppSettings,
+    Account,
 } from "@/lib/db";
 import { useLivePrices } from "@/hooks/use-live-prices";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -119,6 +120,7 @@ interface AssetHolding {
     avgBuyPrice: number;
     lastBuyPrice: number;
     totalCostBasis: number;
+    byAccount: Record<number, number>; // accountId -> amount
 }
 
 interface DashboardSnapshot {
@@ -130,6 +132,7 @@ interface DashboardSnapshot {
         totalUnrealizedPnL: number;
         totalPnLPercent: number;
     };
+    accounts: Account[];
 }
 
 // Helper to consolidate ledger entries AND calculate avg buy price
@@ -173,6 +176,19 @@ const calculateHoldings = (
         let totalCost = 0;
         let lastBuy = 0;
 
+        // For per-account calculation, we need ALL entries (including transfers)
+        // to get accurate account-level balances
+        const allEntriesForTicker = entries.filter(e => e.assetTicker === ticker);
+        const byAccount: Record<number, number> = {};
+
+        // Calculate per-account balances using ALL entries
+        allEntriesForTicker.forEach((entry) => {
+            const accountId = entry.accountId;
+            if (!byAccount[accountId]) byAccount[accountId] = 0;
+            byAccount[accountId] += entry.amount;
+        });
+
+        // Calculate total and cost basis using filtered entries (excluding transfers)
         history.forEach((entry) => {
             const qty = entry.amount;
             const tradeType = entry.tradeId !== undefined ? tradeTypeMap.get(entry.tradeId) : undefined;
@@ -217,12 +233,21 @@ const calculateHoldings = (
         const avgPrice = totalQty > 0 ? totalCost / totalQty : 0;
 
         if (totalQty > 0) {
+            // Filter out zero/negative account balances
+            const filteredByAccount: Record<number, number> = {};
+            Object.entries(byAccount).forEach(([accId, amt]) => {
+                if (amt > 0.00000001) {
+                    filteredByAccount[Number(accId)] = amt;
+                }
+            });
+
             results.push({
                 ticker,
                 amount: totalQty,
                 avgBuyPrice: avgPrice,
                 lastBuyPrice: lastBuy,
                 totalCostBasis: totalCost,
+                byAccount: filteredByAccount,
             });
         }
     });
@@ -239,8 +264,13 @@ const calculateRealizedPnL = (
 
     let totalRealizedPnL = 0;
 
+    // Sort trades by date to process in chronological order
+    const sortedTrades = [...trades].sort((a, b) => 
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
     // Find all sell trades
-    const sellTrades = trades.filter((t) => t.type === "sell");
+    const sellTrades = sortedTrades.filter((t) => t.type === "sell");
 
     sellTrades.forEach((trade) => {
         // Get ledger entries for this sell trade
@@ -250,10 +280,58 @@ const calculateRealizedPnL = (
         const soldEntry = tradeEntries.find((e) => e.amount < 0);
         const receivedEntry = tradeEntries.find((e) => e.amount > 0);
 
-        if (soldEntry && receivedEntry && soldEntry.usdPriceAtTime) {
+        if (soldEntry && receivedEntry) {
             const soldAmount = Math.abs(soldEntry.amount);
-            const costBasis = soldAmount * soldEntry.usdPriceAtTime;
+            const soldAssetTicker = soldEntry.assetTicker;
+
+            // Calculate weighted average cost basis from all buy/deposit entries BEFORE this sell
+            const tradeDate = new Date(trade.date);
+            const priorEntries = ledger.filter((e) => {
+                if (e.assetTicker !== soldAssetTicker) return false;
+                const entryTrade = trades.find((t) => t.id === e.tradeId);
+                if (!entryTrade) return false;
+                const entryDate = new Date(entryTrade.date);
+                return entryDate <= tradeDate;
+            });
+
+            // Calculate weighted average cost
+            let totalQty = 0;
+            let totalCost = 0;
+
+            priorEntries.forEach((entry) => {
+                const entryTrade = trades.find((t) => t.id === entry.tradeId);
+                const qty = entry.amount;
+
+                if (qty > 0) {
+                    // Positive entry (buy/deposit/gain)
+                    const tradeType = entryTrade?.type;
+                    if (tradeType !== "gain") {
+                        // Only add cost for non-gain transactions
+                        const price = entry.usdPriceAtTime || 0;
+                        const cost = qty * price;
+                        totalCost += cost;
+                        totalQty += qty;
+                    } else {
+                        totalQty += qty;
+                    }
+                } else {
+                    // Negative entry (sell/withdraw/loss)
+                    const absQty = Math.abs(qty);
+                    const avgPrice = totalQty > 0 ? totalCost / totalQty : 0;
+                    const costRemoved = absQty * avgPrice;
+                    totalCost -= costRemoved;
+                    totalQty -= absQty;
+                }
+            });
+
+            // Calculate cost basis for this sell
+            const avgCostBasis = totalQty > 0 ? totalCost / totalQty : 0;
+            const costBasis = soldAmount * avgCostBasis;
+
+            // Calculate proceeds
             const proceeds = receivedEntry.amount * (receivedEntry.usdPriceAtTime || 1);
+
+            // Calculate PnL
             const pnl = proceeds - costBasis;
             totalRealizedPnL += pnl;
         }
@@ -291,47 +369,57 @@ const fetchHistoricalPrices = async (
         return { [symbols[0]]: cached.data }; // Simplified for single symbol case
     }
 
-    // Fetch historical data for each symbol
+    // Fetch historical data for each symbol with timeout
     const promises = symbols.map(async (symbol) => {
-        try {
-            // Use Binance klines endpoint for daily data
-            const response = await fetch(
-                `https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=1d&startTime=${startTime}&endTime=${endTime}&limit=31`
-            );
+        // Add timeout to prevent hanging on CORS errors
+        const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, 2000));
+        
+        const fetchPromise = (async () => {
+            try {
+                // Note: Direct Binance API calls will fail due to CORS in browser
+                // We silently skip fetching and fall back to using ledger prices
+                const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=1d&limit=31`;
+                
+                const response = await fetch(binanceUrl);
 
-            if (!response.ok) {
-                console.warn(`Binance API error for ${symbol}: ${response.status}`);
-                return;
-            }
-
-            const klines = await response.json();
-            const priceData: Record<string, number> = {};
-
-            klines.forEach((kline: any[]) => {
-                // Kline format: [openTime, open, high, low, close, volume, closeTime, ...]
-                const timestamp = kline[0];
-                const closePrice = parseFloat(kline[4]);
-
-                if (!isNaN(closePrice) && closePrice > 0) {
-                    // Convert UTC timestamp to local date for proper timezone alignment
-                    const utcDate = new Date(timestamp);
-                    const localDate = new Date(utcDate.getTime() - (utcDate.getTimezoneOffset() * 60000));
-                    const dateStr = localDate.toISOString().split('T')[0];
-                    priceData[dateStr] = closePrice;
+                if (!response.ok) {
+                    // Silently fail - dashboard will use ledger prices as fallback
+                    return;
                 }
-            });
 
-            results[symbol] = priceData;
+                const klines = await response.json();
+                const priceData: Record<string, number> = {};
 
-            // Cache successful results
-            historicalPriceCache.set(`${symbol}_${startTime}_${endTime}`, {
-                data: priceData,
-                timestamp: Date.now()
-            });
+                klines.forEach((kline: any[]) => {
+                    // Kline format: [openTime, open, high, low, close, volume, closeTime, ...]
+                    const timestamp = kline[0];
+                    const closePrice = parseFloat(kline[4]);
 
-        } catch (error) {
-            console.warn(`Failed to fetch historical prices for ${symbol}:`, error);
-        }
+                    if (!isNaN(closePrice) && closePrice > 0) {
+                        // Convert UTC timestamp to local date for proper timezone alignment
+                        const utcDate = new Date(timestamp);
+                        const localDate = new Date(utcDate.getTime() - (utcDate.getTimezoneOffset() * 60000));
+                        const dateStr = localDate.toISOString().split('T')[0];
+                        priceData[dateStr] = closePrice;
+                    }
+                });
+
+                results[symbol] = priceData;
+
+                // Cache successful results
+                historicalPriceCache.set(`${symbol}_${startTime}_${endTime}`, {
+                    data: priceData,
+                    timestamp: Date.now()
+                });
+
+            } catch (error) {
+                // Silently fail - CORS or network errors are expected
+                // Dashboard will use ledger entry prices as fallback
+            }
+        })();
+
+        // Race between fetch and timeout - continue after 2 seconds regardless
+        await Promise.race([fetchPromise, timeoutPromise]);
     });
 
     await Promise.all(promises);
@@ -509,6 +597,11 @@ export default function Dashboard() {
         [],
         undefined as AppSettings | undefined,
     );
+    const accounts = useLiveQuery(
+        () => db.accounts.toArray(),
+        [],
+        undefined as Account[] | undefined,
+    );
 
     const [snapshot, setSnapshot] = React.useState<DashboardSnapshot | null>(
         null,
@@ -603,8 +696,9 @@ export default function Dashboard() {
     const tradesReady = Array.isArray(trades);
     const targetsReady = Array.isArray(targets);
     const settingsReady = Boolean(settings);
+    const accountsReady = Array.isArray(accounts);
     const readyForCalculation =
-        ledgerReady && tradesReady && targetsReady && settingsReady;
+        ledgerReady && tradesReady && targetsReady && settingsReady && accountsReady;
 
     React.useEffect(() => {
         if (!readyForCalculation) {
@@ -666,13 +760,14 @@ export default function Dashboard() {
                     totalUnrealizedPnL,
                     totalPnLPercent,
                 },
+                accounts: accounts || [],
             });
         });
 
         return () => {
             cancelled = true;
         };
-    }, [readyForCalculation, holdings, prices]);
+    }, [readyForCalculation, holdings, prices, accounts]);
 
     const targetMap = React.useMemo(() => {
         const map = new Map<string, number>();
@@ -1288,14 +1383,16 @@ export default function Dashboard() {
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Asset</TableHead>
+                                        {(snapshot?.accounts || []).map((acc) => (
+                                            <TableHead key={acc.id} className="text-right">
+                                                {acc.name}
+                                            </TableHead>
+                                        ))}
                                         <TableHead className="text-right">
-                                            Balance
+                                            Total
                                         </TableHead>
                                         <TableHead className="text-right">
                                             Price
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            vs Last Buy
                                         </TableHead>
                                         <TableHead className="text-right">
                                             Avg Buy
@@ -1323,8 +1420,7 @@ export default function Dashboard() {
                                                 ? (value / totals.totalValue) *
                                                   100
                                                 : 0;
-                                        const targetPct =
-                                            targetMap.get(h.ticker) || 0;
+                                        const targetPct = targetMap.get(h.ticker) || 0;
                                         const diff = actualPct - targetPct;
 
                                         const pnl = value - h.totalCostBasis;
@@ -1332,19 +1428,18 @@ export default function Dashboard() {
                                             h.totalCostBasis > 0
                                                 ? (pnl / h.totalCostBasis) * 100
                                                 : 0;
-                                        const lastBuyDiff =
-                                            h.lastBuyPrice > 0
-                                                ? ((price - h.lastBuyPrice) /
-                                                      h.lastBuyPrice) *
-                                                  100
-                                                : 0;
 
                                         return (
                                             <TableRow key={h.ticker}>
                                                 <TableCell className="font-medium">
                                                     {h.ticker}
                                                 </TableCell>
-                                                <TableCell className="text-right">
+                                                {(snapshot?.accounts || []).map((acc) => (
+                                                    <TableCell key={acc.id} className="text-right text-muted-foreground">
+                                                        {h.byAccount[acc.id!] ? formatCrypto(h.byAccount[acc.id!]) : "-"}
+                                                    </TableCell>
+                                                ))}
+                                                <TableCell className="text-right font-medium">
                                                     {formatCrypto(h.amount)}
                                                 </TableCell>
                                                 <TableCell className="text-right">
@@ -1381,37 +1476,8 @@ export default function Dashboard() {
                                                         )}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="text-right">
-                                                    <div
-                                                        className={cn(
-                                                            "flex flex-col items-end",
-                                                            lastBuyDiff >= 0
-                                                                ? "text-green-600 dark:text-green-400"
-                                                                : "text-red-500 dark:text-red-400",
-                                                        )}
-                                                    >
-                                                        <span className="text-xs font-semibold">
-                                                            {lastBuyDiff > 0
-                                                                ? "+"
-                                                                : ""}
-                                                            {lastBuyDiff.toFixed(
-                                                                2,
-                                                            )}
-                                                            %
-                                                        </span>
-                                                        <span className="text-[10px] text-muted-foreground">
-                                                            (
-                                                            {formatCurrency(
-                                                                h.lastBuyPrice,
-                                                            )}
-                                                            )
-                                                        </span>
-                                                    </div>
-                                                </TableCell>
                                                 <TableCell className="text-right text-muted-foreground">
-                                                    {formatCurrency(
-                                                        h.avgBuyPrice,
-                                                    )}
+                                                    {formatCurrency(h.avgBuyPrice)}
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     {formatCurrency(value)}
@@ -1461,10 +1527,6 @@ export default function Dashboard() {
                                                             >
                                                                 {diff > 0 ? ">" : "<"}{" "}
                                                                 {Math.abs(diff).toFixed(1)}%
-                                                                {" ("}                                                                {formatCrypto(
-                                                                    (Math.abs(diff) / 100) * totals.totalValue / price
-                                                                )}
-                                                                {" "}{h.ticker})
                                                             </span>
                                                         )}
                                                     </div>
@@ -1472,6 +1534,57 @@ export default function Dashboard() {
                                             </TableRow>
                                         );
                                     })}
+                                    {/* Summary Row */}
+                                    <TableRow className="bg-muted/50 font-semibold border-t-2">
+                                        <TableCell>Total</TableCell>
+                                        {(snapshot?.accounts || []).map((acc) => {
+                                            const accTotal = displayedHoldings.reduce((sum, h) => {
+                                                const price = priceFor(h.ticker);
+                                                const amount = h.byAccount[acc.id!] || 0;
+                                                return sum + (amount * price);
+                                            }, 0);
+                                            const accPct = totals.totalValue > 0 
+                                                ? (accTotal / totals.totalValue) * 100 
+                                                : 0;
+                                            return (
+                                                <TableCell key={acc.id} className="text-right">
+                                                    <div className="flex flex-col items-end">
+                                                        <span>{formatCurrency(accTotal)}</span>
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {accPct.toFixed(1)}%
+                                                        </span>
+                                                    </div>
+                                                </TableCell>
+                                            );
+                                        })}
+                                        <TableCell className="text-right">
+                                            {displayedHoldings.length} assets
+                                        </TableCell>
+                                        <TableCell className="text-right">-</TableCell>
+                                        <TableCell className="text-right">-</TableCell>
+                                        <TableCell className="text-right">
+                                            {formatCurrency(totals.totalValue)}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <div
+                                                className={cn(
+                                                    "flex flex-col items-end",
+                                                    totals.totalUnrealizedPnL >= 0
+                                                        ? "text-green-600 dark:text-green-400"
+                                                        : "text-red-500 dark:text-red-400",
+                                                )}
+                                            >
+                                                <span>
+                                                    {totals.totalUnrealizedPnL > 0 ? "+" : ""}
+                                                    {formatCurrency(totals.totalUnrealizedPnL)}
+                                                </span>
+                                                <span className="text-xs">
+                                                    {totals.totalPnLPercent.toFixed(2)}%
+                                                </span>
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="text-right">100%</TableCell>
+                                    </TableRow>
                                 </TableBody>
                             </Table>
                             {/* Mobile Cards */}
