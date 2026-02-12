@@ -127,28 +127,28 @@ export default function Dashboard() {
 
         const activeHoldings = holdings.filter(h => h.currentAmount > 0);
 
-        const allPricesResolved = activeHoldings.every((holding) => {
-            const livePrice = prices[holding.ticker];
-            if (Number.isFinite(livePrice)) return true;
-            return lastStablePricesRef.current[holding.ticker] !== undefined;
-        });
-
-        if (!allPricesResolved) {
-            return;
-        }
-
         let cancelled = false;
         startTransition(() => {
             if (cancelled) return;
 
             const resolvedPrices: Record<string, number> = {};
-            activeHoldings.forEach((holding) => {
+            
+            // Resolve prices for all holdings (not just active ones) to show in table
+            holdings.forEach((holding) => {
                 const livePrice = prices[holding.ticker];
-                if (Number.isFinite(livePrice)) {
+                const customPrice = customPrices[holding.ticker];
+                
+                if (customPrice !== undefined) {
+                    // Manual price override takes precedence
+                    resolvedPrices[holding.ticker] = customPrice;
+                } else if (Number.isFinite(livePrice)) {
+                    // Use live price from Binance
                     resolvedPrices[holding.ticker] = livePrice as number;
                 } else if (lastStablePricesRef.current[holding.ticker] !== undefined) {
+                    // Use last known price
                     resolvedPrices[holding.ticker] = lastStablePricesRef.current[holding.ticker];
                 } else {
+                    // Default to 0 if no price available
                     resolvedPrices[holding.ticker] = 0;
                 }
             });
@@ -172,9 +172,15 @@ export default function Dashboard() {
 
             if (cancelled) return;
 
-            lastStablePricesRef.current = resolvedPrices;
+            // Update last stable prices with resolved prices
+            Object.keys(resolvedPrices).forEach(ticker => {
+                if (resolvedPrices[ticker] > 0) {
+                    lastStablePricesRef.current[ticker] = resolvedPrices[ticker];
+                }
+            });
+            
             setSnapshot({
-                holdings: activeHoldings,
+                holdings: holdings, // Show all holdings, not just active ones
                 prices: resolvedPrices,
                 totals: {
                     totalValue,
@@ -189,7 +195,7 @@ export default function Dashboard() {
         return () => {
             cancelled = true;
         };
-    }, [readyForCalculation, holdings, prices]);
+    }, [readyForCalculation, holdings, prices, customPrices]);
 
     const hasSnapshot = Boolean(snapshot);
     const totals = snapshot?.totals || {

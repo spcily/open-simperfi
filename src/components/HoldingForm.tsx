@@ -76,6 +76,15 @@ export function HoldingForm({ holding, onSuccess, onCancel }: HoldingFormProps) 
         notes: data.notes,
       });
     } else {
+      // Check for duplicate ticker
+      const existingHoldings = await db.holdings.toArray();
+      const duplicate = existingHoldings.find(h => h.ticker.toUpperCase() === data.ticker.toUpperCase());
+      
+      if (duplicate) {
+        alert(`Holding for ${data.ticker} already exists. Please edit the existing holding instead.`);
+        return;
+      }
+
       // Create new holding - add to all accounts with amount only in selected account
       const accountDistribution = allAccounts.map(acc => 
         acc.id ? { accountId: acc.id, amount: acc.id === accountId ? amount : 0 } : null
