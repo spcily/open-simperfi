@@ -10,8 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 
 const holdingSchema = z.object({
   ticker: z.string().min(1, 'Ticker is required').toUpperCase(),
-  buyAvgPrice: z.string().min(1, 'Buy average price is required'),
-  amount: z.string().min(1, 'Amount is required'),
+  buyAvgPrice: z.string().optional(),
+  amount: z.string().optional(),
   accountId: z.string().min(1, 'Account is required'),
   notes: z.string().optional(),
 });
@@ -44,8 +44,8 @@ export function HoldingForm({ holding, onSuccess, onCancel }: HoldingFormProps) 
 
   const onSubmit = async (data: HoldingFormValues) => {
     const accountId = parseInt(data.accountId);
-    const buyAvgPrice = parseFloat(data.buyAvgPrice);
-    const amount = parseFloat(data.amount);
+    const buyAvgPrice = data.buyAvgPrice ? parseFloat(data.buyAvgPrice) : 0;
+    const amount = data.amount ? parseFloat(data.amount) : 0;
 
     // Get all accounts to create distribution across all
     const allAccounts = await db.accounts.toArray();
@@ -110,7 +110,7 @@ export function HoldingForm({ holding, onSuccess, onCancel }: HoldingFormProps) 
       </div>
 
       <div>
-        <Label htmlFor="buyAvgPrice">Average Buy Price (USD)</Label>
+        <Label htmlFor="buyAvgPrice">Average Buy Price (USD) (optional)</Label>
         <Input
           id="buyAvgPrice"
           type="number"
@@ -118,13 +118,16 @@ export function HoldingForm({ holding, onSuccess, onCancel }: HoldingFormProps) 
           placeholder="0.00"
           {...form.register('buyAvgPrice')}
         />
+        <p className="text-xs text-muted-foreground mt-1">
+          Leave empty to set later using calculator
+        </p>
         {form.formState.errors.buyAvgPrice && (
           <p className="text-sm text-red-500 mt-1">{form.formState.errors.buyAvgPrice.message}</p>
         )}
       </div>
 
       <div>
-        <Label htmlFor="amount">Amount</Label>
+        <Label htmlFor="amount">Amount (optional)</Label>
         <Input
           id="amount"
           type="number"
@@ -132,6 +135,9 @@ export function HoldingForm({ holding, onSuccess, onCancel }: HoldingFormProps) 
           placeholder="0.00"
           {...form.register('amount')}
         />
+        <p className="text-xs text-muted-foreground mt-1">
+          Leave empty to set later per account
+        </p>
         {form.formState.errors.amount && (
           <p className="text-sm text-red-500 mt-1">{form.formState.errors.amount.message}</p>
         )}
