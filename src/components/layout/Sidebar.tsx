@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Wallet, ArrowRightLeft, Settings } from "lucide-react";
+import { LayoutDashboard, Wallet, Settings } from "lucide-react";
 
 export function SidebarContent() {
     const location = useLocation();
@@ -8,7 +8,6 @@ export function SidebarContent() {
     const links = [
         { href: "/", label: "Dashboard", icon: LayoutDashboard },
         { href: "/accounts", label: "Accounts", icon: Wallet },
-        { href: "/transactions", label: "Activity", icon: ArrowRightLeft },
         { href: "/settings", label: "Settings", icon: Settings },
     ];
 

@@ -40,31 +40,27 @@ const slugify = (label: string) => {
 
 const nowIso = () => new Date().toISOString();
 
-export type TransactionType = 'deposit' | 'withdraw' | 'trade' | 'transfer' | 'buy' | 'sell' | 'gain' | 'loss';
-
 export interface Account {
   id?: number;
   name: string;
   type: AccountTypeValue;
 }
 
-export interface Trade {
-  id?: number;
-  date: Date;
-  type: TransactionType;
-  notes?: string;
-  pair?: string; // Trading pair like "ETH/USDC" or "SOL/USDT"
-  pairPrice?: number; // Price of the pair (e.g., ETH price in USDC)
-  actualPrice?: number; // For sell orders: inverse price (1/pairPrice)
+export interface AccountHolding {
+  accountId: number;
+  amount: number;
 }
 
-export interface LedgerEntry {
+export interface Holding {
   id?: number;
-  tradeId: number;
-  accountId: number;
-  assetTicker: string;
-  amount: number; // Positive for incoming, negative for outgoing
-  usdPriceAtTime?: number; // Snapshot of price for historical PnL
+  ticker: string;
+  buyAvgPrice: number; // Portfolio-wide average buy price
+  buyTotalAmount: number; // Total amount bought
+  sellAvgPrice?: number; // Portfolio-wide average sell price
+  sellTotalAmount?: number; // Total amount sold
+  currentAmount: number; // Current holding amount (buyTotalAmount - sellTotalAmount)
+  accountDistribution: AccountHolding[]; // How holdings are distributed across accounts
+  notes?: string;
 }
 
 export interface TargetAllocation {
@@ -75,6 +71,7 @@ export interface TargetAllocation {
 export interface AppSettings {
   id?: number; // Singleton, likely just key 1
   customPrices?: Record<string, number>;
+  depositedAmount?: number; // Total amount invested/deposited
 }
 
 export interface SnapshotRecord {
@@ -185,8 +182,7 @@ const generateDatabaseId = (label: string, existing: ManagedDatabase[]) => {
 
 export class OpenSimperfiDB extends Dexie {
   accounts!: Table<Account>;
-  trades!: Table<Trade>;
-  ledger!: Table<LedgerEntry>;
+  holdings!: Table<Holding>;
   targets!: Table<TargetAllocation>;
   settings!: Table<AppSettings>;
   snapshots!: Table<SnapshotRecord>;
@@ -250,6 +246,74 @@ export class OpenSimperfiDB extends Dexie {
           }
         });
       });
+
+    // Version 4: Simplify to direct holdings management
+    this.version(4)
+      .stores({
+        accounts: '++id, name, type',
+        holdings: '++id, ticker',
+        targets: '&ticker',
+        settings: '++id',
+        snapshots: '++id, date',
+        trades: null,
+        ledger: null,
+      })
+      .upgrade(async (tx) => {
+        // Migrate from complex ledger to simple holdings
+        const holdingsTable = tx.table('holdings');
+        const legacyLedger = await tx.table('ledger').toArray();
+        const accounts = await tx.table('accounts').toArray();
+
+        if (legacyLedger.length === 0 || accounts.length === 0) return;
+
+        // Group ledger entries by ticker
+        const grouped: Record<string, any[]> = {};
+        legacyLedger.forEach((entry: any) => {
+          if (!grouped[entry.assetTicker]) grouped[entry.assetTicker] = [];
+          grouped[entry.assetTicker].push(entry);
+        });
+
+        // Convert to holdings
+        const holdings: Holding[] = [];
+        Object.entries(grouped).forEach(([ticker, entries]) => {
+          let buyTotal = 0;
+          let buySum = 0;
+          let sellTotal = 0;
+          let sellSum = 0;
+          const accountDist: Record<number, number> = {};
+
+          entries.forEach((entry: any) => {
+            if (entry.amount > 0) {
+              buyTotal += entry.amount;
+              buySum += entry.amount * (entry.usdPriceAtTime || 0);
+              accountDist[entry.accountId] = (accountDist[entry.accountId] || 0) + entry.amount;
+            } else {
+              sellTotal += Math.abs(entry.amount);
+              sellSum += Math.abs(entry.amount) * (entry.usdPriceAtTime || 0);
+              accountDist[entry.accountId] = (accountDist[entry.accountId] || 0) + entry.amount;
+            }
+          });
+
+          const currentAmount = buyTotal - sellTotal;
+          if (currentAmount > 0) {
+            holdings.push({
+              ticker,
+              buyAvgPrice: buyTotal > 0 ? buySum / buyTotal : 0,
+              buyTotalAmount: buyTotal,
+              sellAvgPrice: sellTotal > 0 ? sellSum / sellTotal : undefined,
+              sellTotalAmount: sellTotal > 0 ? sellTotal : undefined,
+              currentAmount,
+              accountDistribution: Object.entries(accountDist)
+                .filter(([_, amt]) => amt > 0)
+                .map(([accId, amt]) => ({ accountId: Number(accId), amount: amt })),
+            });
+          }
+        });
+
+        if (holdings.length) {
+          await holdingsTable.bulkAdd(holdings);
+        }
+      });
   }
 }
 
@@ -273,9 +337,10 @@ export const initDB = async (instance: OpenSimperfiDB = db) => {
 
 export interface DatabaseDump {
   accounts?: Account[];
-  wallets?: Account[];
-  trades: Trade[];
-  ledger: LedgerEntry[];
+  wallets?: Account[]; // Legacy support
+  holdings?: Holding[];
+  trades?: any[]; // Legacy support
+  ledger?: any[]; // Legacy support
   targets: TargetAllocation[];
   settings: AppSettings[];
   snapshots?: SnapshotRecord[];
@@ -284,12 +349,6 @@ export interface DatabaseDump {
     version: number;
   };
 }
-
-const normalizeTrades = (records: Trade[]) =>
-  records.map((trade) => ({
-    ...trade,
-    date: trade.date instanceof Date ? trade.date : new Date(trade.date),
-  }));
 
 const migrateLegacyAccountTypes = async (instance: OpenSimperfiDB) => {
   const accounts = await instance.accounts.toArray();
@@ -315,10 +374,9 @@ export const exportDatabaseDump = async (
     ? instance.snapshots.toArray()
     : Promise.resolve<SnapshotRecord[]>([]);
 
-  const [accounts, trades, ledger, targets, settings, snapshots] = await Promise.all([
+  const [accounts, holdings, targets, settings, snapshots] = await Promise.all([
     instance.accounts.toArray(),
-    instance.trades.toArray(),
-    instance.ledger.toArray(),
+    instance.holdings.toArray(),
     instance.targets.toArray(),
     instance.settings.toArray(),
     snapshotsPromise,
@@ -326,21 +384,18 @@ export const exportDatabaseDump = async (
 
   return {
     accounts,
-    wallets: accounts,
-    trades,
-    ledger,
+    holdings,
     targets,
     settings,
     snapshots: includeSnapshots ? snapshots : undefined,
     meta: {
       timestamp: nowIso(),
-      version: 3,
+      version: 4,
     },
   };
 };
 
 export const importDatabaseDump = async (instance: OpenSimperfiDB, payload: DatabaseDump) => {
-  const tradesWithDates = normalizeTrades(payload.trades || []);
   const normalizedAccounts = (payload.accounts || payload.wallets || []).map((account) => ({
     ...account,
     type: normalizeAccountType(account.type),
@@ -349,22 +404,19 @@ export const importDatabaseDump = async (instance: OpenSimperfiDB, payload: Data
   await instance.transaction(
     'rw',
     instance.accounts,
-    instance.trades,
-    instance.ledger,
+    instance.holdings,
     instance.targets,
     instance.settings,
     async () => {
       await Promise.all([
         instance.accounts.clear(),
-        instance.trades.clear(),
-        instance.ledger.clear(),
+        instance.holdings.clear(),
         instance.targets.clear(),
         instance.settings.clear(),
       ]);
 
       if (normalizedAccounts.length) await instance.accounts.bulkAdd(normalizedAccounts);
-      if (tradesWithDates.length) await instance.trades.bulkAdd(tradesWithDates);
-      if (payload.ledger?.length) await instance.ledger.bulkAdd(payload.ledger);
+      if (payload.holdings?.length) await instance.holdings.bulkAdd(payload.holdings);
       if (payload.targets?.length) await instance.targets.bulkAdd(payload.targets);
       if (payload.settings?.length) await instance.settings.bulkAdd(payload.settings);
     }
@@ -375,7 +427,7 @@ export const importDatabaseDump = async (instance: OpenSimperfiDB, payload: Data
     await instance.snapshots.clear();
     await instance.snapshots.bulkAdd(payload.snapshots);
   }
-};
+};;
 
 export const getManagedDatabases = (): ManagedDatabase[] => {
   const list = readDatabaseList();

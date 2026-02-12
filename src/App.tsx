@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import Dashboard from '@/pages/Dashboard'
 import AccountsPage from '@/pages/AccountsPage'
-import TransactionsPage from '@/pages/TransactionsPage'
 import SettingsPage from '@/pages/SettingsPage'
 import Layout from '@/components/layout/Layout'
 import { ThemeProvider } from '@/components/theme-provider'
@@ -30,7 +29,6 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/wallets" element={<Navigate to="/accounts" replace />} />
-            <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>

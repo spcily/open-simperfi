@@ -15,28 +15,28 @@ export default function AccountsPage() {
     const [editingAccount, setEditingAccount] = React.useState<Account | null>(null);
 
     const accounts = useLiveQuery(() => db.accounts.toArray());
-    const ledger = useLiveQuery(() => db.ledger.toArray());
+    const holdings = useLiveQuery(() => db.holdings.toArray());
 
     const accountBalances = React.useMemo(() => {
-        if (!accounts || !ledger) return new Map<number, string>();
+        if (!accounts || !holdings) return new Map<number, string>();
 
         const map = new Map<number, string>();
         
         accounts.forEach(account => {
             if (!account.id) return;
             
-            // Get entries for this account
-            const entries = ledger.filter(l => l.accountId === account.id);
-            
-            // Sum per ticker
-            const sums: Record<string, number> = {};
-            entries.forEach(e => {
-                sums[e.assetTicker] = (sums[e.assetTicker] || 0) + e.amount;
+            // Get holdings with amounts in this account
+            const balances: Record<string, number> = {};
+            holdings.forEach(holding => {
+                const accountHolding = holding.accountDistribution.find(ah => ah.accountId === account.id);
+                const amountInAccount = accountHolding?.amount || 0;
+                if (Math.abs(amountInAccount) > 0.000001) {
+                    balances[holding.ticker] = amountInAccount;
+                }
             });
 
             // Format string (e.g. "0.5 BTC, 100 USD")
-            const balanceStr = Object.entries(sums)
-                .filter(([_, bal]) => Math.abs(bal) > 0.000001) // Filter dust
+            const balanceStr = Object.entries(balances)
                 .map(([ticker, bal]) => `${formatCrypto(bal)} ${ticker}`)
                 .join(', ');
             
@@ -44,7 +44,7 @@ export default function AccountsPage() {
         });
         
         return map;
-    }, [accounts, ledger]);
+    }, [accounts, holdings]);
 
     const onDelete = async (id: number) => {
         if (confirm("Are you sure? This will NOT delete the associated transactions, effectively 'orphaning' them.")) {

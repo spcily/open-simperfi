@@ -34,21 +34,22 @@ export default function Accounts() {
   const fetchData = async () => {
     try {
       const allAccounts = await db.accounts.toArray();
-      const allLedger = await db.ledger.toArray();
+      const allHoldings = await db.holdings.toArray();
 
       const accountsWithBalances = allAccounts.map((account) => {
-        const accountEntries = allLedger.filter((l) => l.accountId === account.id);
-        
-        // Sum by ticker
+        // For each holding, check if this account has any amount
         const balances: Record<string, number> = {};
-        accountEntries.forEach((entry) => {
-          balances[entry.assetTicker] = (balances[entry.assetTicker] || 0) + entry.amount;
+        
+        allHoldings.forEach((holding) => {
+          const accountHolding = holding.accountDistribution.find(ah => ah.accountId === account.id);
+          const amountInAccount = accountHolding?.amount || 0;
+          if (Math.abs(amountInAccount) > 0.000001) {
+            balances[holding.ticker] = amountInAccount;
+          }
         });
 
         // Create summary string (e.g. "1.2 BTC, 500 USD")
-        // Filter out zero or near-zero balances
         const summaryParts = Object.entries(balances)
-          .filter(([_, amount]) => Math.abs(amount) > 0.000001)
           .map(([ticker, amount]) => `${amount.toLocaleString()} ${ticker}`);
 
         const balanceSummary = summaryParts.length > 0 ? summaryParts.join(", ") : "No assets";

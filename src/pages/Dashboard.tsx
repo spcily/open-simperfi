@@ -1,641 +1,70 @@
-import * as React from "react";
-import { useLiveQuery } from "dexie-react-hooks";
-import {
-    db,
-    LedgerEntry,
-    Trade,
-    TargetAllocation,
-    AppSettings,
-    Account,
-} from "@/lib/db";
-import { useLivePrices } from "@/hooks/use-live-prices";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { AllocationForm } from "@/components/AllocationForm";
-import { BuyFormComponent } from "@/components/forms/BuyFormComponent";
-import { SellFormComponent } from "@/components/forms/SellFormComponent";
-import { DepositFormComponent } from "@/components/forms/DepositFormComponent";
-import { WithdrawFormComponent } from "@/components/forms/WithdrawFormComponent";
-import { TransferFormComponent } from "@/components/forms/TransferFormComponent";
-import { GainFormComponent } from "@/components/forms/GainFormComponent";
-import { LossFormComponent } from "@/components/forms/LossFormComponent";
-import { formatCurrency, formatCrypto, cn } from "@/lib/utils";
-import {
-    Dialog,
-    DialogContent,
-    DialogTrigger,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-} from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Pencil } from "lucide-react";
-import {
-    PieChart,
-    Pie,
-    Cell,
-    ResponsiveContainer,
-    Legend,
-    Tooltip,
-    LineChart,
-    Line,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-} from "recharts";
-
-// Memoized Portfolio Value Chart to prevent flickering
-const PortfolioValueChart = React.memo(({ data }: { data: { date: string; value: number }[] }) => (
-    <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data}>
-            <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="hsl(var(--border))"
-            />
-            <XAxis
-                dataKey="date"
-                stroke="hsl(var(--foreground))"
-                tick={{
-                    fill: "hsl(var(--muted-foreground))",
-                }}
-                tickFormatter={(date) => {
-                    const d = new Date(date);
-                    return `${d.getMonth() + 1}/${d.getDate()}`;
-                }}
-            />
-            <YAxis
-                stroke="hsl(var(--foreground))"
-                tick={{
-                    fill: "hsl(var(--muted-foreground))",
-                }}
-                tickFormatter={(value) =>
-                    formatCurrency(value)
-                }
-            />
-            <Tooltip
-                formatter={(value: number) => [
-                    formatCurrency(value),
-                    "Portfolio Value",
-                ]}
-                labelFormatter={(label) =>
-                    new Date(
-                        label,
-                    ).toLocaleDateString()
-                }
-                contentStyle={{
-                    backgroundColor:
-                        "hsl(var(--background))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "6px",
-                    color: "hsl(var(--foreground))",
-                }}
-            />
-            <Line
-                type="monotone"
-                dataKey="value"
-                stroke="#3b82f6"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 6 }}
-            />
-        </LineChart>
-    </ResponsiveContainer>
-));
-
-// Extended type for View
-interface AssetHolding {
-    ticker: string;
-    amount: number;
-    avgBuyPrice: number;
-    lastBuyPrice: number;
-    totalCostBasis: number;
-    byAccount: Record<number, number>; // accountId -> amount
-}
+import * as React from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db, Holding, TargetAllocation, AppSettings, Account } from '@/lib/db';
+import { useLivePrices } from '@/hooks/use-live-prices';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { HoldingForm } from '@/components/HoldingForm';
+import { AllocationForm } from '@/components/AllocationForm';
+import { formatCurrency, formatCrypto, cn } from '@/lib/utils';
+import { Dialog, DialogContent, DialogTrigger, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Skeleton } from '@/components/ui/skeleton';
+import { Pencil, Plus, Calculator } from 'lucide-react';
 
 interface DashboardSnapshot {
-    holdings: AssetHolding[];
+    holdings: Holding[];
     prices: Record<string, number>;
     totals: {
         totalValue: number;
         totalCostBasis: number;
         totalUnrealizedPnL: number;
         totalPnLPercent: number;
+        totalRealizedPnL: number;
     };
-    accounts: Account[];
 }
 
-// Helper to consolidate ledger entries AND calculate avg buy price
-const calculateHoldings = (
-    entries: LedgerEntry[] = [],
-    trades: Trade[] = [],
-    transferTradeIds?: Set<number>,
-): AssetHolding[] => {
-    // Create a map of tradeId -> trade type for quick lookup
-    const tradeTypeMap = new Map<number, string>();
-    trades.forEach((trade) => {
-        if (trade.id !== undefined) {
-            tradeTypeMap.set(trade.id, trade.type);
-        }
-    });
-
-    const filteredEntries = transferTradeIds
-        ? entries.filter((entry) => {
-              if (entry.tradeId === undefined || entry.tradeId === null) {
-                  return true;
-              }
-              return !transferTradeIds.has(entry.tradeId);
-          })
-        : entries;
-
-    // Group by ticker first
-    const grouped: Record<string, LedgerEntry[]> = {};
-    filteredEntries.forEach((e) => {
-        if (!grouped[e.assetTicker]) grouped[e.assetTicker] = [];
-        grouped[e.assetTicker].push(e);
-    });
-
-    const results: AssetHolding[] = [];
-
-    // Calculate Weighted Avg Cost for each ticker
-    Object.entries(grouped).forEach(([ticker, history]) => {
-        // Sort by ID (proxy for time) just in case
-        history.sort((a, b) => (a.id || 0) - (b.id || 0));
-
-        let totalQty = 0;
-        let totalCost = 0;
-        let lastBuy = 0;
-
-        // For per-account calculation, we need ALL entries (including transfers)
-        // to get accurate account-level balances
-        const allEntriesForTicker = entries.filter(e => e.assetTicker === ticker);
-        const byAccount: Record<number, number> = {};
-
-        // Calculate per-account balances using ALL entries
-        allEntriesForTicker.forEach((entry) => {
-            const accountId = entry.accountId;
-            if (!byAccount[accountId]) byAccount[accountId] = 0;
-            byAccount[accountId] += entry.amount;
-        });
-
-        // Calculate total and cost basis using filtered entries (excluding transfers)
-        history.forEach((entry) => {
-            const qty = entry.amount;
-            const tradeType = entry.tradeId !== undefined ? tradeTypeMap.get(entry.tradeId) : undefined;
-
-            if (qty > 0) {
-                // POSITIVE ENTRY (BUY / RECEIVE / DEPOSIT / GAIN)
-                // Check if this is a "gain" transaction
-                if (tradeType === "gain") {
-                    // Gains don't affect cost basis (cost = $0)
-                    // Just add to quantity, don't add to cost
-                    totalQty += qty;
-                    // Still track last buy price for display (but not for avg calc)
-                    // Don't update lastBuy for gains
-                } else {
-                    // Regular buy/deposit - affects cost basis
-                    const price = entry.usdPriceAtTime || 0;
-                    const cost = qty * price;
-
-                    if (price > 0) lastBuy = price;
-
-                    totalCost += cost;
-                    totalQty += qty;
-                }
-            } else {
-                // NEGATIVE ENTRY (SELL / SEND / WITHDRAW / LOSS)
-                // Reduce cost basis proportionally (Weighted Average)
-                const absQty = Math.abs(qty);
-                const avgPrice = totalQty > 0 ? totalCost / totalQty : 0;
-
-                const costRemoved = absQty * avgPrice;
-                totalCost -= costRemoved;
-                totalQty -= absQty;
-            }
-        });
-
-        // Handle floating point errors near zero
-        if (Math.abs(totalQty) < 0.00000001) {
-            totalQty = 0;
-            totalCost = 0;
-        }
-
-        const avgPrice = totalQty > 0 ? totalCost / totalQty : 0;
-
-        if (totalQty > 0) {
-            // Filter out zero/negative account balances
-            const filteredByAccount: Record<number, number> = {};
-            Object.entries(byAccount).forEach(([accId, amt]) => {
-                if (amt > 0.00000001) {
-                    filteredByAccount[Number(accId)] = amt;
-                }
-            });
-
-            results.push({
-                ticker,
-                amount: totalQty,
-                avgBuyPrice: avgPrice,
-                lastBuyPrice: lastBuy,
-                totalCostBasis: totalCost,
-                byAccount: filteredByAccount,
-            });
-        }
-    });
-
-    return results.sort((a, b) => a.ticker.localeCompare(b.ticker));
-};
-
-// Calculate realized PnL from sell trades
-const calculateRealizedPnL = (
-    ledger: LedgerEntry[] = [],
-    trades: Trade[] = [],
-): number => {
-    if (!ledger.length || !trades.length) return 0;
-
-    let totalRealizedPnL = 0;
-
-    // Sort trades by date to process in chronological order
-    const sortedTrades = [...trades].sort((a, b) => 
-        new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-
-    // Find all sell trades
-    const sellTrades = sortedTrades.filter((t) => t.type === "sell");
-
-    sellTrades.forEach((trade) => {
-        // Get ledger entries for this sell trade
-        const tradeEntries = ledger.filter((e) => e.tradeId === trade.id);
-
-        // Find the negative (sold asset) and positive (received currency) entries
-        const soldEntry = tradeEntries.find((e) => e.amount < 0);
-        const receivedEntry = tradeEntries.find((e) => e.amount > 0);
-
-        if (soldEntry && receivedEntry) {
-            const soldAmount = Math.abs(soldEntry.amount);
-            const soldAssetTicker = soldEntry.assetTicker;
-
-            // Calculate weighted average cost basis from all buy/deposit entries BEFORE this sell
-            const tradeDate = new Date(trade.date);
-            const priorEntries = ledger.filter((e) => {
-                if (e.assetTicker !== soldAssetTicker) return false;
-                const entryTrade = trades.find((t) => t.id === e.tradeId);
-                if (!entryTrade) return false;
-                const entryDate = new Date(entryTrade.date);
-                return entryDate <= tradeDate;
-            });
-
-            // Calculate weighted average cost
-            let totalQty = 0;
-            let totalCost = 0;
-
-            priorEntries.forEach((entry) => {
-                const entryTrade = trades.find((t) => t.id === entry.tradeId);
-                const qty = entry.amount;
-
-                if (qty > 0) {
-                    // Positive entry (buy/deposit/gain)
-                    const tradeType = entryTrade?.type;
-                    if (tradeType !== "gain") {
-                        // Only add cost for non-gain transactions
-                        const price = entry.usdPriceAtTime || 0;
-                        const cost = qty * price;
-                        totalCost += cost;
-                        totalQty += qty;
-                    } else {
-                        totalQty += qty;
-                    }
-                } else {
-                    // Negative entry (sell/withdraw/loss)
-                    const absQty = Math.abs(qty);
-                    const avgPrice = totalQty > 0 ? totalCost / totalQty : 0;
-                    const costRemoved = absQty * avgPrice;
-                    totalCost -= costRemoved;
-                    totalQty -= absQty;
-                }
-            });
-
-            // Calculate cost basis for this sell
-            const avgCostBasis = totalQty > 0 ? totalCost / totalQty : 0;
-            const costBasis = soldAmount * avgCostBasis;
-
-            // Calculate proceeds
-            const proceeds = receivedEntry.amount * (receivedEntry.usdPriceAtTime || 1);
-
-            // Calculate PnL
-            const pnl = proceeds - costBasis;
-            totalRealizedPnL += pnl;
-        }
-    });
-
-    return totalRealizedPnL;
-};
-
-// Cache for historical prices to avoid repeated API calls
-const historicalPriceCache = new Map<string, { data: Record<string, number>; timestamp: number }>();
-const CACHE_DURATION = 1000 * 60 * 60; // 1 hour
-
-// Fetch historical daily closing prices from Binance
-const fetchHistoricalPrices = async (
-    symbols: string[],
-    days: number = 30,
-): Promise<Record<string, Record<string, number>>> => {
-    const results: Record<string, Record<string, number>> = {};
-
-    // Get date range
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(endDate.getDate() - days);
-
-    // Format dates for Binance API (milliseconds timestamp)
-    const startTime = startDate.getTime();
-    const endTime = endDate.getTime();
-
-    // Create cache key based on symbols and date range
-    const cacheKey = `${symbols.sort().join(',')}_${startTime}_${endTime}`;
-
-    // Check cache first
-    const cached = historicalPriceCache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
-        return { [symbols[0]]: cached.data }; // Simplified for single symbol case
-    }
-
-    // Fetch historical data for each symbol with timeout
-    const promises = symbols.map(async (symbol) => {
-        // Add timeout to prevent hanging on CORS errors
-        const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, 2000));
-        
-        const fetchPromise = (async () => {
-            try {
-                // Note: Direct Binance API calls will fail due to CORS in browser
-                // We silently skip fetching and fall back to using ledger prices
-                const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=1d&limit=31`;
-                
-                const response = await fetch(binanceUrl);
-
-                if (!response.ok) {
-                    // Silently fail - dashboard will use ledger prices as fallback
-                    return;
-                }
-
-                const klines = await response.json();
-                const priceData: Record<string, number> = {};
-
-                klines.forEach((kline: any[]) => {
-                    // Kline format: [openTime, open, high, low, close, volume, closeTime, ...]
-                    const timestamp = kline[0];
-                    const closePrice = parseFloat(kline[4]);
-
-                    if (!isNaN(closePrice) && closePrice > 0) {
-                        // Convert UTC timestamp to local date for proper timezone alignment
-                        const utcDate = new Date(timestamp);
-                        const localDate = new Date(utcDate.getTime() - (utcDate.getTimezoneOffset() * 60000));
-                        const dateStr = localDate.toISOString().split('T')[0];
-                        priceData[dateStr] = closePrice;
-                    }
-                });
-
-                results[symbol] = priceData;
-
-                // Cache successful results
-                historicalPriceCache.set(`${symbol}_${startTime}_${endTime}`, {
-                    data: priceData,
-                    timestamp: Date.now()
-                });
-
-            } catch (error) {
-                // Silently fail - CORS or network errors are expected
-                // Dashboard will use ledger entry prices as fallback
-            }
-        })();
-
-        // Race between fetch and timeout - continue after 2 seconds regardless
-        await Promise.race([fetchPromise, timeoutPromise]);
-    });
-
-    await Promise.all(promises);
-    return results;
-};
-
-// Calculate portfolio value using daily closing prices for smoother charts
-const calculatePortfolioHistory = async (
-    ledger: LedgerEntry[] = [],
-    trades: Trade[] = [],
-    transferTradeIds: Set<number>,
-    livePrices: Record<string, number> = {},
-): Promise<{ date: string; value: number }[]> => {
-    if (!ledger.length) return [];
-
-    // Get all unique assets in the portfolio
-    const uniqueAssets = [...new Set(ledger.map(e => e.assetTicker))];
-
-    // Fetch historical prices for all assets
-    const historicalPrices = await fetchHistoricalPrices(uniqueAssets, 30);
-
-    // Get date 30 days ago
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-    // Generate all dates for the last 30 days
-    const allDates: Date[] = [];
-    for (let i = 0; i <= 30; i++) {
-        const date = new Date(thirtyDaysAgo);
-        date.setDate(date.getDate() + i);
-        allDates.push(date);
-    }
-
-    // Calculate portfolio value for each day
-    const history: { date: string; value: number }[] = [];
-
-    allDates.forEach((currentDate) => {
-        // Get all ledger entries up to and including this date
-        const entriesUpToDate = ledger.filter((entry) => {
-            const entryTrade = trades.find((t) => t.id === entry.tradeId);
-            if (!entryTrade) return false;
-            const tradeDate = new Date(entryTrade.date);
-            tradeDate.setHours(0, 0, 0, 0);
-            return tradeDate <= currentDate;
-        });
-
-        // Calculate holdings at this point in time
-        const holdingsAtDate = calculateHoldings(
-            entriesUpToDate,
-            trades,
-            transferTradeIds,
-        );
-
-        // Calculate total value using historical or live prices
-        let totalValue = 0;
-        const dateStr = currentDate.toISOString().split('T')[0];
-        const isToday = dateStr === today.toISOString().split('T')[0];
-
-        holdingsAtDate.forEach((holding) => {
-            let price = 0;
-
-            if (isToday) {
-                // Use live price for today
-                price = livePrices[holding.ticker] || 0;
-            } else {
-                // Use historical closing price for past dates
-                const assetPrices = historicalPrices[holding.ticker];
-                if (assetPrices && assetPrices[dateStr]) {
-                    price = assetPrices[dateStr];
-                } else {
-                    // Forward-fill approach: find the most recent price before this date
-                    let fallbackPrice = 0;
-
-                    if (assetPrices) {
-                        // Get all available dates for this asset, sorted chronologically
-                        const availableDates = Object.keys(assetPrices)
-                            .filter(date => assetPrices[date] > 0)
-                            .sort(); // Oldest first
-
-                        // Find the most recent date that is on or before our target date
-                        for (let i = availableDates.length - 1; i >= 0; i--) {
-                            const availableDate = availableDates[i];
-                            if (availableDate <= dateStr) {
-                                fallbackPrice = assetPrices[availableDate];
-                                break;
-                            }
-                        }
-                    }
-
-                    // If no historical price found, use the last known price from ledger entries
-                    if (fallbackPrice === 0) {
-                        const relevantEntries = entriesUpToDate.filter(
-                            (e) =>
-                                e.assetTicker === holding.ticker &&
-                                e.amount > 0 &&
-                                e.usdPriceAtTime,
-                        );
-                        fallbackPrice = relevantEntries.length > 0
-                            ? relevantEntries[relevantEntries.length - 1].usdPriceAtTime || 0
-                            : 0;
-                    }
-
-                    price = fallbackPrice;
-                }
-            }
-
-            totalValue += holding.amount * price;
-        });
-
-        history.push({
-            date: dateStr,
-            value: totalValue,
-        });
-    });
-
-    return history;
-};
-
-// Chart colors for asset allocation
-const CHART_COLORS = [
-    "#3b82f6", // blue
-    "#10b981", // green
-    "#f59e0b", // amber
-    "#ef4444", // red
-    "#8b5cf6", // purple
-    "#ec4899", // pink
-    "#06b6d4", // cyan
-    "#84cc16", // lime
-    "#f97316", // orange
-    "#6366f1", // indigo
-];
+interface EditCalculatorState {
+    holding: Holding;
+    accountId: number | null; // null means editing portfolio averages
+    type: 'buy' | 'sell'; // which average to edit
+}
 
 export default function Dashboard() {
-    const [isBuyModalOpen, setIsBuyModalOpen] = React.useState(false);
-    const [isSellModalOpen, setIsSellModalOpen] = React.useState(false);
-    const [isDepositModalOpen, setIsDepositModalOpen] = React.useState(false);
-    const [isWithdrawModalOpen, setIsWithdrawModalOpen] = React.useState(false);
-    const [isTransferModalOpen, setIsTransferModalOpen] = React.useState(false);
-    const [isGainModalOpen, setIsGainModalOpen] = React.useState(false);
-    const [isLossModalOpen, setIsLossModalOpen] = React.useState(false);
-    const [isAllocationModalOpen, setIsAllocationModalOpen] =
-        React.useState(false);
+    const [isHoldingDialogOpen, setIsHoldingDialogOpen] = React.useState(false);
+    const [isAllocationModalOpen, setIsAllocationModalOpen] = React.useState(false);
     const [isPriceDialogOpen, setIsPriceDialogOpen] = React.useState(false);
-    const [priceOverrideTicker, setPriceOverrideTicker] = React.useState<
-        string | null
-    >(null);
-    const [priceOverrideValue, setPriceOverrideValue] = React.useState("");
-    const [priceDialogError, setPriceDialogError] = React.useState<
-        string | null
-    >(null);
+    const [isDepositDialogOpen, setIsDepositDialogOpen] = React.useState(false);
+    const [depositAmount, setDepositAmount] = React.useState('');
+    const [priceOverrideTicker, setPriceOverrideTicker] = React.useState<string | null>(null);
+    const [priceOverrideValue, setPriceOverrideValue] = React.useState('');
+    const [priceDialogError, setPriceDialogError] = React.useState<string | null>(null);
+    const [editingHolding, setEditingHolding] = React.useState<Holding | undefined>(undefined);
+    const [editCalculator, setEditCalculator] = React.useState<EditCalculatorState | null>(null);
 
     // Live query to the DB
-    const ledger = useLiveQuery(
-        () => db.ledger.toArray(),
-        [],
-        undefined as LedgerEntry[] | undefined,
-    );
-    const trades = useLiveQuery(
-        () => db.trades.toArray(),
-        [],
-        undefined as Trade[] | undefined,
-    );
-    const targets = useLiveQuery(
-        () => db.targets.toArray(),
-        [],
-        undefined as TargetAllocation[] | undefined,
-    );
-    const settings = useLiveQuery(
-        async () => {
-            const record = await db.settings.get(1);
-            return record ?? { id: 1, customPrices: {} };
-        },
-        [],
-        undefined as AppSettings | undefined,
-    );
-    const accounts = useLiveQuery(
-        () => db.accounts.toArray(),
-        [],
-        undefined as Account[] | undefined,
-    );
+    const holdings = useLiveQuery(() => db.holdings.toArray(), [], undefined as Holding[] | undefined);
+    const accounts = useLiveQuery(() => db.accounts.toArray(), [], undefined as Account[] | undefined);
+    const targets = useLiveQuery(() => db.targets.toArray(), [], undefined as TargetAllocation[] | undefined);
+    const settings = useLiveQuery(async () => {
+        const record = await db.settings.get(1);
+        return record ?? { id: 1, customPrices: {}, depositedAmount: 0 };
+    }, [], undefined as AppSettings | undefined);
 
-    const [snapshot, setSnapshot] = React.useState<DashboardSnapshot | null>(
-        null,
-    );
+    const [snapshot, setSnapshot] = React.useState<DashboardSnapshot | null>(null);
     const [, startTransition] = React.useTransition();
     const lastStablePricesRef = React.useRef<Record<string, number>>({});
 
-    const transferTradeIds = React.useMemo<Set<number> | undefined>(() => {
-        if (!trades) return undefined;
-        const ids = new Set<number>();
-        trades.forEach((trade) => {
-            if (trade.type === "transfer" && typeof trade.id === "number") {
-                ids.add(trade.id);
-            }
-        });
-        return ids;
-    }, [trades]);
-
-    const holdings = React.useMemo(
-        () => calculateHoldings(ledger || [], trades || [], transferTradeIds),
-        [ledger, trades, transferTradeIds],
-    );
-
     // Derived Array of assets we need prices for
-    const assetList = React.useMemo(
-        () => holdings.map((h) => h.ticker),
-        [holdings],
+    const assetList = React.useMemo(() => 
+        (holdings || []).filter(h => h.currentAmount > 0).map(h => h.ticker), 
+        [holdings]
     );
-
+    
     // Use the Hook!
-    const customPrices = React.useMemo(
-        () => settings?.customPrices || {},
-        [settings],
-    );
+    const customPrices = React.useMemo(() => settings?.customPrices || {}, [settings]);
     const prices = useLivePrices(assetList, customPrices);
 
     const persistCustomPrices = async (next: Record<string, number>) => {
@@ -649,7 +78,7 @@ export default function Dashboard() {
     const closePriceDialog = () => {
         setIsPriceDialogOpen(false);
         setPriceOverrideTicker(null);
-        setPriceOverrideValue("");
+        setPriceOverrideValue('');
         setPriceDialogError(null);
     };
 
@@ -657,13 +86,7 @@ export default function Dashboard() {
         setPriceOverrideTicker(ticker);
         const existing = customPrices[ticker];
         const live = prices[ticker];
-        setPriceOverrideValue(
-            existing !== undefined
-                ? existing.toString()
-                : live
-                  ? live.toString()
-                  : "",
-        );
+        setPriceOverrideValue(existing !== undefined ? existing.toString() : live ? live.toString() : '');
         setPriceDialogError(null);
         setIsPriceDialogOpen(true);
     };
@@ -672,7 +95,7 @@ export default function Dashboard() {
         if (!priceOverrideTicker) return;
         const parsed = parseFloat(priceOverrideValue);
         if (!Number.isFinite(parsed) || parsed <= 0) {
-            setPriceDialogError("Enter a valid price greater than zero");
+            setPriceDialogError('Enter a valid price greater than zero');
             return;
         }
         const next = { ...customPrices, [priceOverrideTicker]: parsed };
@@ -692,20 +115,19 @@ export default function Dashboard() {
         closePriceDialog();
     };
 
-    const ledgerReady = Array.isArray(ledger);
-    const tradesReady = Array.isArray(trades);
+    const holdingsReady = Array.isArray(holdings);
     const targetsReady = Array.isArray(targets);
     const settingsReady = Boolean(settings);
-    const accountsReady = Array.isArray(accounts);
-    const readyForCalculation =
-        ledgerReady && tradesReady && targetsReady && settingsReady && accountsReady;
+    const readyForCalculation = holdingsReady && targetsReady && settingsReady;
 
     React.useEffect(() => {
-        if (!readyForCalculation) {
+        if (!readyForCalculation || !holdings) {
             return;
         }
 
-        const allPricesResolved = holdings.every((holding) => {
+        const activeHoldings = holdings.filter(h => h.currentAmount > 0);
+
+        const allPricesResolved = activeHoldings.every((holding) => {
             const livePrice = prices[holding.ticker];
             if (Number.isFinite(livePrice)) return true;
             return lastStablePricesRef.current[holding.ticker] !== undefined;
@@ -720,60 +142,54 @@ export default function Dashboard() {
             if (cancelled) return;
 
             const resolvedPrices: Record<string, number> = {};
-            holdings.forEach((holding) => {
+            activeHoldings.forEach((holding) => {
                 const livePrice = prices[holding.ticker];
                 if (Number.isFinite(livePrice)) {
                     resolvedPrices[holding.ticker] = livePrice as number;
-                } else if (
-                    lastStablePricesRef.current[holding.ticker] !== undefined
-                ) {
-                    resolvedPrices[holding.ticker] =
-                        lastStablePricesRef.current[holding.ticker];
+                } else if (lastStablePricesRef.current[holding.ticker] !== undefined) {
+                    resolvedPrices[holding.ticker] = lastStablePricesRef.current[holding.ticker];
                 } else {
                     resolvedPrices[holding.ticker] = 0;
                 }
             });
 
-            const totalCostBasis = holdings.reduce(
-                (sum, h) => sum + h.totalCostBasis,
-                0,
+            const totalCostBasis = activeHoldings.reduce((sum, h) => 
+                sum + (h.buyAvgPrice * h.currentAmount), 0
             );
-            const totalValue = holdings.reduce(
-                (sum, h) => sum + h.amount * (resolvedPrices[h.ticker] || 0),
-                0,
+            const totalValue = activeHoldings.reduce((sum, h) => 
+                sum + (h.currentAmount * (resolvedPrices[h.ticker] || 0)), 0
             );
             const totalUnrealizedPnL = totalValue - totalCostBasis;
-            const totalPnLPercent =
-                totalCostBasis > 0
-                    ? (totalUnrealizedPnL / totalCostBasis) * 100
-                    : 0;
+            const totalPnLPercent = totalCostBasis > 0 ? (totalUnrealizedPnL / totalCostBasis) * 100 : 0;
+            
+            // Calculate realized PnL from sells
+            const totalRealizedPnL = activeHoldings.reduce((sum, h) => {
+                if (!h.sellTotalAmount || !h.sellAvgPrice) return sum;
+                const sellRevenue = h.sellTotalAmount * h.sellAvgPrice;
+                const sellCost = h.sellTotalAmount * h.buyAvgPrice;
+                return sum + (sellRevenue - sellCost);
+            }, 0);
 
             if (cancelled) return;
 
             lastStablePricesRef.current = resolvedPrices;
             setSnapshot({
-                holdings,
+                holdings: activeHoldings,
                 prices: resolvedPrices,
                 totals: {
                     totalValue,
                     totalCostBasis,
                     totalUnrealizedPnL,
                     totalPnLPercent,
+                    totalRealizedPnL,
                 },
-                accounts: accounts || [],
             });
         });
 
         return () => {
             cancelled = true;
         };
-    }, [readyForCalculation, holdings, prices, accounts]);
-
-    const targetMap = React.useMemo(() => {
-        const map = new Map<string, number>();
-        (targets || []).forEach((t) => map.set(t.ticker, t.percentage));
-        return map;
-    }, [targets]);
+    }, [readyForCalculation, holdings, prices]);
 
     const hasSnapshot = Boolean(snapshot);
     const totals = snapshot?.totals || {
@@ -781,251 +197,80 @@ export default function Dashboard() {
         totalCostBasis: 0,
         totalUnrealizedPnL: 0,
         totalPnLPercent: 0,
+        totalRealizedPnL: 0,
     };
     const displayedHoldings = snapshot?.holdings || [];
     const priceFor = (ticker: string) => snapshot?.prices[ticker] || 0;
 
-    // Calculate chart data
-    const allocationChartData = React.useMemo(() => {
-        if (!hasSnapshot || totals.totalValue === 0) return [];
-
-        return displayedHoldings
-            .map((holding, index) => {
-                const price = priceFor(holding.ticker);
-                const value = holding.amount * price;
-                const percentage = (value / totals.totalValue) * 100;
-
-                return {
-                    name: holding.ticker,
-                    value: value,
-                    percentage: percentage,
-                    color: CHART_COLORS[index % CHART_COLORS.length],
-                };
-            })
-            .filter((item) => item.value > 0);
-    }, [hasSnapshot, displayedHoldings, totals.totalValue]);
-
-    const [portfolioHistoryData, setPortfolioHistoryData] = React.useState<{ date: string; value: number }[]>([]);
-    const [isHistoryLoading, setIsHistoryLoading] = React.useState(false);
-
-    // Calculate portfolio history - recalculate when ledger/trades change or when live prices become available
-    React.useEffect(() => {
-        if (!ledger || !trades || !transferTradeIds) {
-            setPortfolioHistoryData([]);
-            return;
-        }
-
-        // Only show loading on initial load, not on price updates
-        const shouldShowLoading = !portfolioHistoryData.length;
-        if (shouldShowLoading) {
-            setIsHistoryLoading(true);
-        }
-
-        const calculateHistory = async () => {
-            try {
-        // Use available live prices (empty object if not yet loaded)
-        const history = await calculatePortfolioHistory(ledger, trades, transferTradeIds, prices || {});
-        setPortfolioHistoryData(history);
-            } catch (error) {
-                console.error('Failed to calculate portfolio history:', error);
-                setPortfolioHistoryData([]);
-            } finally {
-                if (shouldShowLoading) {
-                    setIsHistoryLoading(false);
-                }
-            }
-        };
-
-        calculateHistory();
-    }, [ledger, trades, transferTradeIds, prices]);
-
-    // Calculate realized PnL
-    const realizedPnL = React.useMemo(() => {
-        if (!ledger || !trades) return 0;
-        return calculateRealizedPnL(ledger, trades);
-    }, [ledger, trades]);
-
-    // Calculate 30-day change
-    const thirtyDayChange = React.useMemo(() => {
-        if (portfolioHistoryData.length < 2) return { amount: 0, percent: 0 };
-        const firstValue = portfolioHistoryData[0].value;
-        const lastValue = portfolioHistoryData[portfolioHistoryData.length - 1].value;
-        const changeAmount = lastValue - firstValue;
-        const changePercent = firstValue > 0 ? (changeAmount / firstValue) * 100 : 0;
-        return { amount: changeAmount, percent: changePercent };
-    }, [portfolioHistoryData]);
-
     return (
         <div className="container mx-auto p-4 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-                    OpenSimperfi Portfolio
-                </h1>
-                <div className="flex gap-2 flex-wrap">
-                    <Dialog
-                        open={isAllocationModalOpen}
-                        onOpenChange={setIsAllocationModalOpen}
-                    >
+            <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold tracking-tight">OpenSimperfi Portfolio</h1>
+                <div className="flex gap-2">
+                    <Dialog open={isAllocationModalOpen} onOpenChange={setIsAllocationModalOpen}>
                         <DialogTrigger asChild>
-                            <Button
-                                variant="outline"
-                                className="flex-1 sm:flex-none"
-                            >
-                                Manage Strategy
-                            </Button>
+                            <Button variant="outline">Manage Strategy</Button>
                         </DialogTrigger>
-                        <DialogContent className="sm:max-w-[425px] max-w-[95vw]">
+                        <DialogContent className="sm:max-w-[425px]">
                             <DialogHeader>
                                 <DialogTitle>Portfolio Targets</DialogTitle>
                             </DialogHeader>
-                            <AllocationForm
-                                onSuccess={() =>
-                                    setIsAllocationModalOpen(false)
-                                }
-                            />
+                            <AllocationForm onSuccess={() => setIsAllocationModalOpen(false)} />
                         </DialogContent>
                     </Dialog>
 
-                    <div className="flex gap-2 flex-wrap">
-                        <Dialog
-                            open={isBuyModalOpen}
-                            onOpenChange={setIsBuyModalOpen}
-                        >
-                            <DialogTrigger asChild>
-                                <Button variant="outline">+ Buy</Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
-                                <DialogHeader>
-                                    <DialogTitle>Add Buy Order</DialogTitle>
-                                </DialogHeader>
-                                <BuyFormComponent
-                                    onSuccess={() => setIsBuyModalOpen(false)}
-                                />
-                            </DialogContent>
-                        </Dialog>
-
-                        <Dialog
-                            open={isSellModalOpen}
-                            onOpenChange={setIsSellModalOpen}
-                        >
-                            <DialogTrigger asChild>
-                                <Button variant="outline">+ Sell</Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
-                                <DialogHeader>
-                                    <DialogTitle>Add Sell Order</DialogTitle>
-                                </DialogHeader>
-                                <SellFormComponent
-                                    onSuccess={() => setIsSellModalOpen(false)}
-                                />
-                            </DialogContent>
-                        </Dialog>
-
-                        <Dialog
-                            open={isDepositModalOpen}
-                            onOpenChange={setIsDepositModalOpen}
-                        >
-                            <DialogTrigger asChild>
-                                <Button variant="outline">+ Deposit</Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
-                                <DialogHeader>
-                                    <DialogTitle>Add Deposit</DialogTitle>
-                                </DialogHeader>
-                                <DepositFormComponent
-                                    onSuccess={() => setIsDepositModalOpen(false)}
-                                />
-                            </DialogContent>
-                        </Dialog>
-
-                        <Dialog
-                            open={isWithdrawModalOpen}
-                            onOpenChange={setIsWithdrawModalOpen}
-                        >
-                            <DialogTrigger asChild>
-                                <Button variant="outline">+ Withdraw</Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
-                                <DialogHeader>
-                                    <DialogTitle>Add Withdrawal</DialogTitle>
-                                </DialogHeader>
-                                <WithdrawFormComponent
-                                    onSuccess={() => setIsWithdrawModalOpen(false)}
-                                />
-                            </DialogContent>
-                        </Dialog>
-
-                        <Dialog
-                            open={isTransferModalOpen}
-                            onOpenChange={setIsTransferModalOpen}
-                        >
-                            <DialogTrigger asChild>
-                                <Button variant="outline">+ Transfer</Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
-                                <DialogHeader>
-                                    <DialogTitle>Add Transfer</DialogTitle>
-                                </DialogHeader>
-                                <TransferFormComponent
-                                    onSuccess={() => setIsTransferModalOpen(false)}
-                                />
-                            </DialogContent>
-                        </Dialog>
-
-                        <Dialog
-                            open={isGainModalOpen}
-                            onOpenChange={setIsGainModalOpen}
-                        >
-                            <DialogTrigger asChild>
-                                <Button variant="outline">+ Gain</Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
-                                <DialogHeader>
-                                    <DialogTitle>Record Gain</DialogTitle>
-                                </DialogHeader>
-                                <GainFormComponent
-                                    onSuccess={() => setIsGainModalOpen(false)}
-                                />
-                            </DialogContent>
-                        </Dialog>
-
-                        <Dialog
-                            open={isLossModalOpen}
-                            onOpenChange={setIsLossModalOpen}
-                        >
-                            <DialogTrigger asChild>
-                                <Button variant="outline">+ Loss</Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-w-[95vw]">
-                                <DialogHeader>
-                                    <DialogTitle>Record Loss</DialogTitle>
-                                </DialogHeader>
-                                <LossFormComponent
-                                    onSuccess={() => setIsLossModalOpen(false)}
-                                />
-                            </DialogContent>
-                        </Dialog>
-                    </div>
+                    <Dialog open={isHoldingDialogOpen} onOpenChange={(open) => {
+                        setIsHoldingDialogOpen(open);
+                        if (!open) setEditingHolding(undefined);
+                    }}>
+                        <DialogTrigger asChild>
+                            <Button>
+                                <Plus className="mr-2 h-4 w-4" /> Add Holding
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[500px]">
+                            <DialogHeader>
+                                <DialogTitle>
+                                    {editingHolding ? 'Edit Holding' : 'Add New Holding'}
+                                </DialogTitle>
+                            </DialogHeader>
+                            <HoldingForm
+                                holding={editingHolding}
+                                onSuccess={() => {
+                                    setIsHoldingDialogOpen(false);
+                                    setEditingHolding(undefined);
+                                }}
+                            />
+                        </DialogContent>
+                    </Dialog>
                 </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">
-                            Total Portfolio Value
-                        </CardTitle>
+                        <CardTitle className="text-sm font-medium">Total Portfolio Value</CardTitle>
                     </CardHeader>
                     <CardContent>
                         {hasSnapshot ? (
                             <>
-                                <div className="text-2xl font-bold">
-                                    {formatCurrency(totals.totalValue)}
+                                <div className="text-2xl font-bold">{formatCurrency(totals.totalValue)}</div>
+                                <div className="flex items-center gap-1 mt-1">
+                                    <p className="text-xs text-muted-foreground">
+                                       Deposited: {formatCurrency(settings?.depositedAmount || 0)}
+                                    </p>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground"
+                                        onClick={() => {
+                                            setDepositAmount((settings?.depositedAmount || 0).toString());
+                                            setIsDepositDialogOpen(true);
+                                        }}
+                                    >
+                                        <Pencil className="h-3 w-3" />
+                                    </Button>
                                 </div>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    Cost Basis:{" "}
-                                    {formatCurrency(totals.totalCostBasis)}
-                                </p>
                             </>
                         ) : (
                             <>
@@ -1037,34 +282,22 @@ export default function Dashboard() {
                 </Card>
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">
-                            Unrealized PnL
-                        </CardTitle>
+                         <CardTitle className="text-sm font-medium">Unrealized PnL</CardTitle>
                     </CardHeader>
                     <CardContent>
                         {hasSnapshot ? (
                             <>
-                                <div
-                                    className={cn(
-                                        "text-2xl font-bold",
-                                        totals.totalUnrealizedPnL >= 0
-                                            ? "text-green-600 dark:text-green-400"
-                                            : "text-red-500 dark:text-red-400",
-                                    )}
-                                >
-                                    {totals.totalUnrealizedPnL > 0 ? "+" : ""}
-                                    {formatCurrency(totals.totalUnrealizedPnL)}
+                                <div className={cn(
+                                    "text-2xl font-bold",
+                                    totals.totalUnrealizedPnL >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"
+                                )}>
+                                    {totals.totalUnrealizedPnL > 0 ? '+' : ''}{formatCurrency(totals.totalUnrealizedPnL)}
                                 </div>
-                                <p
-                                    className={cn(
-                                        "text-xs mt-1",
-                                        totals.totalPnLPercent >= 0
-                                            ? "text-green-600 dark:text-green-400"
-                                            : "text-red-500 dark:text-red-400",
-                                    )}
-                                >
-                                    {totals.totalPnLPercent > 0 ? "+" : ""}
-                                    {totals.totalPnLPercent.toFixed(2)}%
+                                <p className={cn(
+                                    "text-xs mt-1",
+                                    totals.totalPnLPercent >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"
+                                )}>
+                                     {totals.totalPnLPercent > 0 ? '+' : ''}{totals.totalPnLPercent.toFixed(2)}%
                                 </p>
                             </>
                         ) : (
@@ -1077,66 +310,56 @@ export default function Dashboard() {
                 </Card>
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">
-                            Realized PnL
-                        </CardTitle>
+                         <CardTitle className="text-sm font-medium">All-Time PnL</CardTitle>
                     </CardHeader>
                     <CardContent>
                         {hasSnapshot ? (
                             <>
-                                <div
-                                    className={cn(
-                                        "text-2xl font-bold",
-                                        realizedPnL >= 0
-                                            ? "text-green-600 dark:text-green-400"
-                                            : "text-red-500 dark:text-red-400",
-                                    )}
-                                >
-                                    {realizedPnL > 0 ? "+" : ""}
-                                    {formatCurrency(realizedPnL)}
+                                {(() => {
+                                    const deposited = settings?.depositedAmount || 0;
+                                    const allTimePnL = totals.totalValue - deposited;
+                                    const allTimePnLPercent = deposited > 0 ? (allTimePnL / deposited) * 100 : 0;
+                                    return (
+                                        <>
+                                            <div className={cn(
+                                                "text-2xl font-bold",
+                                                allTimePnL >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"
+                                            )}>
+                                                {allTimePnL > 0 ? '+' : ''}{formatCurrency(allTimePnL)}
+                                            </div>
+                                            <p className={cn(
+                                                "text-xs mt-1",
+                                                allTimePnLPercent >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"
+                                            )}>
+                                                {allTimePnLPercent > 0 ? '+' : ''}{allTimePnLPercent.toFixed(2)}%
+                                            </p>
+                                        </>
+                                    );
+                                })()}
+                            </>
+                        ) : (
+                            <>
+                                <Skeleton className="h-8 w-32 mb-2" />
+                                <Skeleton className="h-4 w-20" />
+                            </>
+                        )}
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                         <CardTitle className="text-sm font-medium">Total PnL</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {hasSnapshot ? (
+                            <>
+                                <div className={cn(
+                                    "text-2xl font-bold",
+                                    (totals.totalRealizedPnL + totals.totalUnrealizedPnL) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"
+                                )}>
+                                    {(totals.totalRealizedPnL + totals.totalUnrealizedPnL) > 0 ? '+' : ''}{formatCurrency(totals.totalRealizedPnL + totals.totalUnrealizedPnL)}
                                 </div>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    From sell orders
-                                </p>
-                            </>
-                        ) : (
-                            <>
-                                <Skeleton className="h-8 w-32 mb-2" />
-                                <Skeleton className="h-4 w-20" />
-                            </>
-                        )}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">
-                            30-Day Change
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        {hasSnapshot ? (
-                            <>
-                                <div
-                                    className={cn(
-                                        "text-2xl font-bold",
-                                        thirtyDayChange.amount >= 0
-                                            ? "text-green-600 dark:text-green-400"
-                                            : "text-red-500 dark:text-red-400",
-                                    )}
-                                >
-                                    {thirtyDayChange.amount > 0 ? "+" : ""}
-                                    {formatCurrency(thirtyDayChange.amount)}
-                                </div>
-                                <p
-                                    className={cn(
-                                        "text-xs mt-1",
-                                        thirtyDayChange.percent >= 0
-                                            ? "text-green-600 dark:text-green-400"
-                                            : "text-red-500 dark:text-red-400",
-                                    )}
-                                >
-                                    {thirtyDayChange.percent > 0 ? "+" : ""}
-                                    {thirtyDayChange.percent.toFixed(2)}%
+                                   Realized + Unrealized
                                 </p>
                             </>
                         ) : (
@@ -1149,600 +372,186 @@ export default function Dashboard() {
                 </Card>
             </div>
 
-            {/* Charts Row */}
-            {hasSnapshot && (
-                <div className="grid gap-4 md:grid-cols-2">
-                    {/* Asset Allocation Pie Chart */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Asset Allocation</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            {allocationChartData.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <PieChart>
-                                        <Pie
-                                            data={allocationChartData}
-                                            cx="50%"
-                                            cy="50%"
-                                            labelLine={false}
-                                            label={({
-                                                cx,
-                                                cy,
-                                                midAngle,
-                                                innerRadius,
-                                                outerRadius,
-                                                percent,
-                                                name,
-                                            }: any) => {
-                                                const RADIAN = Math.PI / 180;
-                                                const radius =
-                                                    innerRadius +
-                                                    (outerRadius -
-                                                        innerRadius) *
-                                                        0.5;
-                                                const x =
-                                                    cx +
-                                                    radius *
-                                                        Math.cos(
-                                                            -midAngle * RADIAN,
-                                                        );
-                                                const y =
-                                                    cy +
-                                                    radius *
-                                                        Math.sin(
-                                                            -midAngle * RADIAN,
-                                                        );
-
-                                                return (
-                                                    <text
-                                                        x={x}
-                                                        y={y}
-                                                        fill="white"
-                                                        stroke="#000"
-                                                        strokeWidth="1"
-                                                        paintOrder="stroke"
-                                                        textAnchor={
-                                                            x > cx
-                                                                ? "start"
-                                                                : "end"
-                                                        }
-                                                        dominantBaseline="central"
-                                                        style={{
-                                                            fontSize: "12px",
-                                                            fontWeight: "bold",
-                                                        }}
-                                                    >
-                                                        {`${name} ${(percent * 100).toFixed(1)}%`}
-                                                    </text>
-                                                );
-                                            }}
-                                            outerRadius={80}
-                                            fill="#8884d8"
-                                            dataKey="value"
-                                            isAnimationActive={false}
-                                        >
-                                            {allocationChartData.map(
-                                                (entry, index) => (
-                                                    <Cell
-                                                        key={`cell-${index}`}
-                                                        fill={entry.color}
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip
-                                            formatter={(
-                                                value: number,
-                                                name: string,
-                                                props: any,
-                                            ) => [
-                                                `${formatCurrency(value)} (${props.payload.percentage.toFixed(1)}%)`,
-                                                name,
-                                            ]}
-                                            contentStyle={{
-                                                backgroundColor:
-                                                    "hsl(var(--background))",
-                                                border: "1px solid hsl(var(--border))",
-                                                borderRadius: "6px",
-                                                color: "hsl(var(--foreground))",
-                                            }}
-                                        />
-                                        <Legend
-                                            formatter={(value: string) => {
-                                                const data =
-                                                    allocationChartData.find(
-                                                        (d) => d.name === value,
-                                                    );
-                                                return `${value} (${data?.percentage.toFixed(1)}%)`;
-                                            }}
-                                            wrapperStyle={{ fontSize: "14px" }}
-                                        />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                            ) : (
-                                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                                    No assets to display
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-
-                    {/* Portfolio Value History Line Chart */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>
-                                Portfolio Value (Last 30 Days)
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            {isHistoryLoading ? (
-                                <div className="h-[300px] flex items-center justify-center">
-                                    <div className="text-center">
-                                        <Skeleton className="h-4 w-32 mx-auto mb-2" />
-                                        <Skeleton className="h-4 w-24 mx-auto" />
-                                    </div>
-                                </div>
-                            ) : portfolioHistoryData.length > 0 ? (
-                                <PortfolioValueChart data={portfolioHistoryData} />
-                            ) : (
-                                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                                    No transaction history in the last 30 days
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-                </div>
-            )}
-
             <Card>
                 <CardHeader>
                     <CardTitle>Holdings</CardTitle>
                 </CardHeader>
                 <CardContent>
                     {!hasSnapshot ? (
-                        <>
-                            {/* Desktop Table */}
-                            <Table className="hidden md:table">
+                        <div className="overflow-x-auto">
+                            <Table>
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Asset</TableHead>
-                                        <TableHead className="text-right">
-                                            Balance
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Price
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            vs Last Buy
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Avg Buy
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Value
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Unrealized PnL
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Allocation (Actual / Target)
-                                        </TableHead>
+                                        <TableHead className="text-right">Price</TableHead>
+                                        <TableHead className="text-right">Buy Avg</TableHead>
+                                        <TableHead className="text-right">Sell Avg</TableHead>
+                                        {[1, 2, 3].map((i) => (
+                                            <TableHead key={i} className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableHead>
+                                        ))}
+                                        <TableHead className="text-right">Total</TableHead>
+                                        <TableHead className="text-right">Value</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {[1, 2, 3].map((i) => (
                                         <TableRow key={i}>
-                                            <TableCell>
-                                                <Skeleton className="h-4 w-16" />
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Skeleton className="h-4 w-20 ml-auto" />
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Skeleton className="h-4 w-16 ml-auto" />
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Skeleton className="h-4 w-16 ml-auto" />
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Skeleton className="h-4 w-16 ml-auto" />
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Skeleton className="h-4 w-20 ml-auto" />
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Skeleton className="h-4 w-20 ml-auto" />
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Skeleton className="h-4 w-24 ml-auto" />
-                                            </TableCell>
+                                            <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                                            <TableCell className="text-right"><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
                                         </TableRow>
                                     ))}
                                 </TableBody>
                             </Table>
-                            {/* Mobile Cards */}
-                            <div className="md:hidden space-y-3">
-                                {[1, 2, 3].map((i) => (
-                                    <div
-                                        key={i}
-                                        className="border rounded-lg p-4 space-y-2"
-                                    >
-                                        <Skeleton className="h-5 w-20" />
-                                        <Skeleton className="h-4 w-full" />
-                                        <Skeleton className="h-4 w-full" />
-                                        <Skeleton className="h-4 w-3/4" />
-                                    </div>
-                                ))}
-                            </div>
-                        </>
+                        </div>
                     ) : (
-                        <>
-                            {/* Desktop Table */}
-                            <Table className="hidden md:table">
+                        <div className="overflow-x-auto">
+                            <Table>
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Asset</TableHead>
-                                        {(snapshot?.accounts || []).map((acc) => (
-                                            <TableHead key={acc.id} className="text-right">
-                                                {acc.name}
+                                        <TableHead className="text-right">Price</TableHead>
+                                        <TableHead className="text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                                Buy Avg
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-5 w-5 p-0 text-muted-foreground"
+                                                    onClick={() => setEditCalculator({ holding: displayedHoldings[0], accountId: null, type: 'buy' })}
+                                                    disabled={displayedHoldings.length === 0}
+                                                >
+                                                    <Calculator className="h-3 w-3" />
+                                                </Button>
+                                            </div>
+                                        </TableHead>
+                                        <TableHead className="text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                                Sell Avg
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-5 w-5 p-0 text-muted-foreground"
+                                                    onClick={() => setEditCalculator({ holding: displayedHoldings[0], accountId: null, type: 'sell' })}
+                                                    disabled={displayedHoldings.length === 0}
+                                                >
+                                                    <Calculator className="h-3 w-3" />
+                                                </Button>
+                                            </div>
+                                        </TableHead>
+                                        {accounts?.map((account) => (
+                                            <TableHead key={account.id} className="text-right">
+                                                {account.name}
                                             </TableHead>
                                         ))}
-                                        <TableHead className="text-right">
-                                            Total
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Price
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Avg Buy
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Value
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Unrealized PnL
-                                        </TableHead>
-                                        <TableHead className="text-right">
-                                            Allocation (Actual / Target)
-                                        </TableHead>
+                                        <TableHead className="text-right">Total</TableHead>
+                                        <TableHead className="text-right">Value</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {displayedHoldings.map((h) => {
                                         const price = priceFor(h.ticker);
-                                        const isManualPrice =
-                                            customPrices[h.ticker] !==
-                                            undefined;
-                                        const value = h.amount * price;
-                                        const actualPct =
-                                            totals.totalValue > 0
-                                                ? (value / totals.totalValue) *
-                                                  100
-                                                : 0;
-                                        const targetPct = targetMap.get(h.ticker) || 0;
-                                        const diff = actualPct - targetPct;
-
-                                        const pnl = value - h.totalCostBasis;
-                                        const pnlPercent =
-                                            h.totalCostBasis > 0
-                                                ? (pnl / h.totalCostBasis) * 100
-                                                : 0;
+                                        const isManualPrice = customPrices[h.ticker] !== undefined;
+                                        const value = h.currentAmount * price;
 
                                         return (
-                                            <TableRow key={h.ticker}>
-                                                <TableCell className="font-medium">
-                                                    {h.ticker}
-                                                </TableCell>
-                                                {(snapshot?.accounts || []).map((acc) => (
-                                                    <TableCell key={acc.id} className="text-right text-muted-foreground">
-                                                        {h.byAccount[acc.id!] ? formatCrypto(h.byAccount[acc.id!]) : "-"}
-                                                    </TableCell>
-                                                ))}
-                                                <TableCell className="text-right font-medium">
-                                                    {formatCrypto(h.amount)}
-                                                </TableCell>
+                                            <TableRow key={h.id}>
+                                                <TableCell className="font-medium">{h.ticker}</TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex flex-col items-end gap-1">
                                                         <div className="flex items-center gap-1">
-                                                            <span>
-                                                                {formatCurrency(
-                                                                    price,
-                                                                )}
-                                                            </span>
+                                                            <span>{formatCurrency(price)}</span>
                                                             <Button
                                                                 type="button"
                                                                 variant="ghost"
                                                                 size="icon"
                                                                 className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                                                                onClick={() =>
-                                                                    openPriceDialog(
-                                                                        h.ticker,
-                                                                    )
-                                                                }
+                                                                onClick={() => openPriceDialog(h.ticker)}
                                                             >
                                                                 <Pencil className="h-3.5 w-3.5" />
-                                                                <span className="sr-only">
-                                                                    {isManualPrice
-                                                                        ? "Edit manual price"
-                                                                        : "Set manual price"}
-                                                                </span>
+                                                                <span className="sr-only">{isManualPrice ? 'Edit manual price' : 'Set manual price'}</span>
                                                             </Button>
                                                         </div>
                                                         {isManualPrice && (
-                                                            <span className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                                                                Manual
-                                                            </span>
+                                                            <span className="text-[10px] uppercase tracking-wide text-amber-600">Manual</span>
                                                         )}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="text-right text-muted-foreground">
-                                                    {formatCurrency(h.avgBuyPrice)}
-                                                </TableCell>
                                                 <TableCell className="text-right">
-                                                    {formatCurrency(value)}
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                    <div
-                                                        className={cn(
-                                                            "flex flex-col items-end",
-                                                            pnl >= 0
-                                                                ? "text-green-600 dark:text-green-400"
-                                                                : "text-red-500 dark:text-red-400",
-                                                        )}
-                                                    >
-                                                        <span>
-                                                            {pnl > 0 ? "+" : ""}
-                                                            {formatCurrency(
-                                                                pnl,
-                                                            )}
-                                                        </span>
-                                                        <span className="text-xs">
-                                                            {pnlPercent.toFixed(
-                                                                2,
-                                                            )}
-                                                            %
-                                                        </span>
+                                                    <div className="flex items-center justify-end gap-1">
+                                                        <span className="text-muted-foreground">{formatCurrency(h.buyAvgPrice)}</span>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                                            onClick={() => setEditCalculator({ holding: h, accountId: null, type: 'buy' })}
+                                                        >
+                                                            <Pencil className="h-3.5 w-3.5" />
+                                                        </Button>
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-right">
-                                                    <div className="flex flex-col items-end">
-                                                        <span>
-                                                            {actualPct.toFixed(
-                                                                1,
-                                                            )}
-                                                            %{" "}
-                                                            <span className="text-muted-foreground text-xs">
-                                                                / {targetPct}%
-                                                            </span>
-                                                        </span>
-                                                        {targetPct > 0 && diff !== 0 && (
-                                                            <span
-                                                                className={cn(
-                                                                    "text-xs",
-                                                                    diff > 0
-                                                                        ? "text-amber-600 dark:text-amber-400"
-                                                                        : "text-blue-500 dark:text-blue-400",
-                                                                )}
-                                                            >
-                                                                {diff > 0 ? ">" : "<"}{" "}
-                                                                {Math.abs(diff).toFixed(1)}%
-                                                            </span>
-                                                        )}
+                                                    <div className="flex items-center justify-end gap-1">
+                                                        <span className="text-muted-foreground">{h.sellAvgPrice ? formatCurrency(h.sellAvgPrice) : '-'}</span>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                                            onClick={() => setEditCalculator({ holding: h, accountId: null, type: 'sell' })}
+                                                        >
+                                                            <Pencil className="h-3.5 w-3.5" />
+                                                        </Button>
                                                     </div>
                                                 </TableCell>
+                                                {accounts?.map((account) => {
+                                                    const accountHolding = h.accountDistribution.find(d => d.accountId === account.id);
+                                                    const amount = accountHolding?.amount || 0;
+                                                    return (
+                                                        <TableCell key={account.id} className="text-right">
+                                                            <div className="flex items-center justify-end gap-1">
+                                                                <span>{formatCrypto(amount)}</span>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                                                    onClick={() => setEditCalculator({ holding: h, accountId: account.id!, type: 'buy' })}
+                                                                >
+                                                                    <Pencil className="h-3.5 w-3.5" />
+                                                                </Button>
+                                                            </div>
+                                                        </TableCell>
+                                                    );
+                                                })}
+                                                <TableCell className="text-right font-medium">{formatCrypto(h.currentAmount)}</TableCell>
+                                                <TableCell className="text-right">{formatCurrency(value)}</TableCell>
                                             </TableRow>
                                         );
                                     })}
-                                    {/* Summary Row */}
-                                    <TableRow className="bg-muted/50 font-semibold border-t-2">
-                                        <TableCell>Total</TableCell>
-                                        {(snapshot?.accounts || []).map((acc) => {
-                                            const accTotal = displayedHoldings.reduce((sum, h) => {
-                                                const price = priceFor(h.ticker);
-                                                const amount = h.byAccount[acc.id!] || 0;
-                                                return sum + (amount * price);
-                                            }, 0);
-                                            const accPct = totals.totalValue > 0 
-                                                ? (accTotal / totals.totalValue) * 100 
-                                                : 0;
-                                            return (
-                                                <TableCell key={acc.id} className="text-right">
-                                                    <div className="flex flex-col items-end">
-                                                        <span>{formatCurrency(accTotal)}</span>
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {accPct.toFixed(1)}%
-                                                        </span>
-                                                    </div>
-                                                </TableCell>
-                                            );
-                                        })}
-                                        <TableCell className="text-right">
-                                            {displayedHoldings.length} assets
-                                        </TableCell>
-                                        <TableCell className="text-right">-</TableCell>
-                                        <TableCell className="text-right">-</TableCell>
-                                        <TableCell className="text-right">
-                                            {formatCurrency(totals.totalValue)}
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <div
-                                                className={cn(
-                                                    "flex flex-col items-end",
-                                                    totals.totalUnrealizedPnL >= 0
-                                                        ? "text-green-600 dark:text-green-400"
-                                                        : "text-red-500 dark:text-red-400",
-                                                )}
-                                            >
-                                                <span>
-                                                    {totals.totalUnrealizedPnL > 0 ? "+" : ""}
-                                                    {formatCurrency(totals.totalUnrealizedPnL)}
-                                                </span>
-                                                <span className="text-xs">
-                                                    {totals.totalPnLPercent.toFixed(2)}%
-                                                </span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="text-right">100%</TableCell>
-                                    </TableRow>
                                 </TableBody>
                             </Table>
-                            {/* Mobile Cards */}
-                            <div className="md:hidden space-y-3">
-                                {displayedHoldings.map((h) => {
-                                    const price = priceFor(h.ticker);
-                                    const isManualPrice =
-                                        customPrices[h.ticker] !== undefined;
-                                    const value = h.amount * price;
-                                    const actualPct =
-                                        totals.totalValue > 0
-                                            ? (value / totals.totalValue) * 100
-                                            : 0;
-                                    const targetPct =
-                                        targetMap.get(h.ticker) || 0;
-                                    const diff = actualPct - targetPct;
-
-                                    const pnl = value - h.totalCostBasis;
-                                    const pnlPercent =
-                                        h.totalCostBasis > 0
-                                            ? (pnl / h.totalCostBasis) * 100
-                                            : 0;
-
-                                    return (
-                                        <div
-                                            key={h.ticker}
-                                            className="border rounded-lg p-4 space-y-3"
-                                        >
-                                            <div className="flex items-center justify-between">
-                                                <h3 className="text-lg font-bold">
-                                                    {h.ticker}
-                                                </h3>
-                                                <div className="text-right">
-                                                    <div className="text-sm font-medium">
-                                                        {formatCurrency(value)}
-                                                    </div>
-                                                    <div className="text-xs text-muted-foreground">
-                                                        {actualPct.toFixed(1)}%
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3 text-sm">
-                                                <div>
-                                                    <div className="text-muted-foreground text-xs mb-1">
-                                                        Balance
-                                                    </div>
-                                                    <div className="font-medium">
-                                                        {formatCrypto(h.amount)}
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-muted-foreground text-xs mb-1">
-                                                        Price
-                                                    </div>
-                                                    <div className="flex items-center gap-1 justify-end">
-                                                        <span className="font-medium">
-                                                            {formatCurrency(
-                                                                price,
-                                                            )}
-                                                        </span>
-                                                        <Button
-                                                            type="button"
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-5 w-5 p-0 text-muted-foreground"
-                                                            onClick={() =>
-                                                                openPriceDialog(
-                                                                    h.ticker,
-                                                                )
-                                                            }
-                                                        >
-                                                            <Pencil className="h-3 w-3" />
-                                                        </Button>
-                                                    </div>
-                                                    {isManualPrice && (
-                                                        <div className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400 text-right">
-                                                            Manual
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div>
-                                                    <div className="text-muted-foreground text-xs mb-1">
-                                                        Unrealized PnL
-                                                    </div>
-                                                    <div
-                                                        className={cn(
-                                                            "font-medium",
-                                                            pnl >= 0
-                                                                ? "text-green-600 dark:text-green-400"
-                                                                : "text-red-500 dark:text-red-400",
-                                                        )}
-                                                    >
-                                                        {pnl > 0 ? "+" : ""}
-                                                        {formatCurrency(pnl)}
-                                                        <span className="text-xs ml-1">
-                                                            (
-                                                            {pnlPercent.toFixed(
-                                                                2,
-                                                            )}
-                                                            %)
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-muted-foreground text-xs mb-1">
-                                                        Target Allocation
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <span className="font-medium">
-                                                            {targetPct}%
-                                                        </span>
-                                                        {targetPct > 0 && diff !== 0 && (
-                                                            <span
-                                                                className={cn(
-                                                                    "text-xs ml-1",
-                                                                    diff > 0
-                                                                        ? "text-amber-600 dark:text-amber-400"
-                                                                        : "text-blue-500 dark:text-blue-400",
-                                                                )}
-                                                            >
-                                                                ({diff > 0 ? ">" : "<"}{" "}
-                                                                {Math.abs(diff).toFixed(1)}%
-                                                                {" "}                                                                {formatCrypto(
-                                                                    (Math.abs(diff) / 100) * totals.totalValue / price
-                                                                )}
-                                                                {" "}{h.ticker})
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </>
+                        </div>
                     )}
                 </CardContent>
             </Card>
 
-            <Dialog
-                open={isPriceDialogOpen}
-                onOpenChange={(open) => {
-                    if (!open) {
-                        closePriceDialog();
-                    }
-                }}
-            >
+            <Dialog open={isPriceDialogOpen} onOpenChange={(open) => {
+                if (!open) {
+                    closePriceDialog();
+                }
+            }}>
                 <DialogContent className="sm:max-w-[420px]">
                     <DialogHeader>
                         <DialogTitle>
-                            {priceOverrideTicker
-                                ? `Manual Price: ${priceOverrideTicker}`
-                                : "Manual Price"}
+                            {priceOverrideTicker ? `Manual Price: ${priceOverrideTicker}` : 'Manual Price'}
                         </DialogTitle>
                         <DialogDescription>
-                            Set a fixed USD price for this asset. Clearing the
-                            override will resume live data from Binance.
+                            Set a fixed USD price for this asset. Clearing the override will resume live data from Binance.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-2">
@@ -1752,49 +561,428 @@ export default function Dashboard() {
                             type="number"
                             step="any"
                             value={priceOverrideValue}
-                            onChange={(event) =>
-                                setPriceOverrideValue(event.target.value)
-                            }
+                            onChange={(event) => setPriceOverrideValue(event.target.value)}
                             placeholder="0.00"
                             autoFocus
                         />
                         {priceDialogError && (
-                            <p className="text-sm text-red-500">
-                                {priceDialogError}
-                            </p>
+                            <p className="text-sm text-red-500">{priceDialogError}</p>
                         )}
                     </div>
                     <DialogFooter className="flex flex-col sm:flex-row sm:justify-between gap-2">
-                        {priceOverrideTicker &&
-                            customPrices[priceOverrideTicker] !== undefined && (
-                                <Button
-                                    type="button"
-                                    variant="secondary"
-                                    onClick={handlePriceDialogClear}
-                                >
-                                    Clear Manual Price
-                                </Button>
-                            )}
+                        {priceOverrideTicker && customPrices[priceOverrideTicker] !== undefined && (
+                            <Button type="button" variant="secondary" onClick={handlePriceDialogClear}>
+                                Clear Manual Price
+                            </Button>
+                        )}
                         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                            <Button
-                                type="button"
-                                variant="outline"
-                                className="w-full sm:w-auto"
-                                onClick={closePriceDialog}
-                            >
+                            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={closePriceDialog}>
                                 Cancel
                             </Button>
-                            <Button
-                                type="button"
-                                className="w-full sm:w-auto"
-                                onClick={handlePriceDialogSave}
-                            >
+                            <Button type="button" className="w-full sm:w-auto" onClick={handlePriceDialogSave}>
                                 Save Price
                             </Button>
                         </div>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {editCalculator && (
+                <EditCalculatorDialog
+                    holding={editCalculator.holding}
+                    accountId={editCalculator.accountId}
+                    type={editCalculator.type}
+                    accounts={accounts || []}
+                    open={true}
+                    onOpenChange={(open) => !open && setEditCalculator(null)}
+                    onSuccess={() => setEditCalculator(null)}
+                />
+            )}
+
+            <Dialog open={isDepositDialogOpen} onOpenChange={setIsDepositDialogOpen}>
+                <DialogContent className="sm:max-w-[400px]">
+                    <DialogHeader>
+                        <DialogTitle>Set Deposited Amount</DialogTitle>
+                        <DialogDescription>
+                            Total amount you've invested/deposited into your portfolio
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div>
+                            <Label htmlFor="deposit-amount">Deposited Amount (USD)</Label>
+                            <Input
+                                id="deposit-amount"
+                                type="number"
+                                step="any"
+                                value={depositAmount}
+                                onChange={(e) => setDepositAmount(e.target.value)}
+                                placeholder="0.00"
+                                autoFocus
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                                Current: {formatCurrency(settings?.depositedAmount || 0)}
+                            </p>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsDepositDialogOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={async () => {
+                            const amt = parseFloat(depositAmount);
+                            if (Number.isFinite(amt) && amt >= 0) {
+                                await db.settings.put({
+                                    ...(settings || {}),
+                                    id: settings?.id || 1,
+                                    depositedAmount: amt,
+                                });
+                                setIsDepositDialogOpen(false);
+                            }
+                        }}>
+                            Save
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
+    );
+}
+
+// Calculator Dialog Component
+interface EditCalculatorDialogProps {
+    holding: Holding;
+    accountId: number | null; // null = edit portfolio averages
+    type: 'buy' | 'sell';
+    accounts: Account[];
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onSuccess: () => void;
+}
+
+function EditCalculatorDialog({ holding, accountId, type, accounts, open, onOpenChange, onSuccess }: EditCalculatorDialogProps) {
+    const [newAmount, setNewAmount] = React.useState('');
+    const [buyAmount, setBuyAmount] = React.useState('');
+    const [buyPrice, setBuyPrice] = React.useState('');
+    const [sellAmount, setSellAmount] = React.useState('');
+    const [sellPrice, setSellPrice] = React.useState('');
+    const [error, setError] = React.useState('');
+
+    const isEditingAccount = accountId !== null;
+    const accountHolding = isEditingAccount ? holding.accountDistribution.find(d => d.accountId === accountId) : null;
+    const currentAmount = isEditingAccount ? (accountHolding?.amount || 0) : holding.currentAmount;
+    const accountName = isEditingAccount ? accounts.find(a => a.id === accountId)?.name : 'Portfolio';
+
+    // Initialize newAmount with current amount when dialog opens
+    React.useEffect(() => {
+        if (open && isEditingAccount) {
+            setNewAmount(currentAmount.toString());
+        }
+    }, [open, isEditingAccount, currentAmount]);
+
+    const handleUpdateAmount = async () => {
+        setError('');
+        const amt = parseFloat(newAmount);
+
+        if (!Number.isFinite(amt) || amt < 0) {
+            setError('Invalid amount');
+            return;
+        }
+
+        // Update account distribution
+        const updatedDistribution = holding.accountDistribution.map(d => 
+            d.accountId === accountId ? { ...d, amount: amt } : d
+        );
+        const newTotalAmount = updatedDistribution.reduce((sum, d) => sum + d.amount, 0);
+
+        await db.holdings.update(holding.id!, {
+            currentAmount: newTotalAmount,
+            accountDistribution: updatedDistribution,
+        });
+
+        setNewAmount('');
+        onSuccess();
+    };
+
+    const calculatedBuyAvg = React.useMemo(() => {
+        const amt = parseFloat(buyAmount);
+        const price = parseFloat(buyPrice);
+        if (Number.isFinite(amt) && Number.isFinite(price) && amt > 0 && price > 0) {
+            const totalCost = holding.buyAvgPrice * holding.buyTotalAmount + price * amt;
+            const totalAmount = holding.buyTotalAmount + amt;
+            return totalCost / totalAmount;
+        }
+        return null;
+    }, [buyAmount, buyPrice, holding.buyAvgPrice, holding.buyTotalAmount]);
+
+    const calculatedSellAvg = React.useMemo(() => {
+        const amt = parseFloat(sellAmount);
+        const price = parseFloat(sellPrice);
+        if (Number.isFinite(amt) && Number.isFinite(price) && amt > 0 && price > 0) {
+            const prevSellTotal = holding.sellTotalAmount || 0;
+            const prevSellSum = (holding.sellAvgPrice || 0) * prevSellTotal;
+            const newSellSum = prevSellSum + price * amt;
+            const newSellTotal = prevSellTotal + amt;
+            return newSellSum / newSellTotal;
+        }
+        return null;
+    }, [sellAmount, sellPrice, holding.sellAvgPrice, holding.sellTotalAmount]);
+
+    const handleApplyBuy = async () => {
+        setError('');
+        const amt = parseFloat(buyAmount);
+        const price = parseFloat(buyPrice);
+
+        if (!Number.isFinite(amt) || amt <= 0) {
+            setError('Invalid buy amount');
+            return;
+        }
+        if (!Number.isFinite(price) || price <= 0) {
+            setError('Invalid buy price');
+            return;
+        }
+
+        const totalCost = holding.buyAvgPrice * holding.buyTotalAmount + price * amt;
+        const totalAmount = holding.buyTotalAmount + amt;
+        const newBuyAvg = totalCost / totalAmount;
+
+        await db.holdings.update(holding.id!, {
+            buyAvgPrice: newBuyAvg,
+            buyTotalAmount: totalAmount,
+        });
+
+        setBuyAmount('');
+        setBuyPrice('');
+        onSuccess();
+    };
+
+    const handleApplySell = async () => {
+        setError('');
+        const amt = parseFloat(sellAmount);
+        const price = parseFloat(sellPrice);
+
+        if (!Number.isFinite(amt) || amt <= 0) {
+            setError('Invalid sell amount');
+            return;
+        }
+        if (!Number.isFinite(price) || price <= 0) {
+            setError('Invalid sell price');
+            return;
+        }
+
+        const prevSellTotal = holding.sellTotalAmount || 0;
+        const prevSellSum = (holding.sellAvgPrice || 0) * prevSellTotal;
+        const newSellSum = prevSellSum + price * amt;
+        const newSellTotal = prevSellTotal + amt;
+        const newSellAvg = newSellSum / newSellTotal;
+
+        await db.holdings.update(holding.id!, {
+            sellAvgPrice: newSellAvg,
+            sellTotalAmount: newSellTotal,
+        });
+
+        setSellAmount('');
+        setSellPrice('');
+        onSuccess();
+    };
+
+    // Render account edit dialog (simple amount input)
+    if (isEditingAccount) {
+        return (
+            <Dialog open={open} onOpenChange={onOpenChange}>
+                <DialogContent className="sm:max-w-[400px]">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Edit {holding.ticker} in {accountName}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Set the holding amount for this account
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div>
+                            <Label htmlFor="amount">Amount</Label>
+                            <Input
+                                id="amount"
+                                type="number"
+                                step="any"
+                                value={newAmount}
+                                onChange={(e) => setNewAmount(e.target.value)}
+                                placeholder="0.00"
+                                autoFocus
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                                Current: {formatCrypto(currentAmount)} {holding.ticker}
+                            </p>
+                        </div>
+                        {error && <p className="text-sm text-red-500">{error}</p>}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => onOpenChange(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handleUpdateAmount}>
+                            Save
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        );
+    }
+
+    // Render portfolio average calculator dialog
+    if (type === 'buy') {
+        return (
+            <Dialog open={open} onOpenChange={onOpenChange}>
+                <DialogContent className="sm:max-w-[400px]">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Edit {holding.ticker} Buy Average
+                        </DialogTitle>
+                        <DialogDescription>
+                            Calculate new buy average using buy amount and price
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                                <p className="text-muted-foreground">Current Holdings:</p>
+                                <p className="font-medium">{formatCrypto(currentAmount)} {holding.ticker}</p>
+                            </div>
+                            <div>
+                                <p className="text-muted-foreground">Current Buy Avg:</p>
+                                <p className="font-medium">{formatCurrency(holding.buyAvgPrice)}</p>
+                            </div>
+                        </div>
+
+                        <div className="border-t pt-4">
+                            <h4 className="font-medium mb-3 flex items-center gap-2">
+                                <Calculator className="h-4 w-4" />
+                                Buy Calculator
+                            </h4>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <Label>Buy Amount</Label>
+                                    <Input
+                                        type="number"
+                                        step="any"
+                                        value={buyAmount}
+                                        onChange={(e) => setBuyAmount(e.target.value)}
+                                        placeholder="0.00"
+                                        autoFocus
+                                    />
+                                </div>
+                                <div>
+                                    <Label>Buy Price (USD)</Label>
+                                    <Input
+                                        type="number"
+                                        step="any"
+                                        value={buyPrice}
+                                        onChange={(e) => setBuyPrice(e.target.value)}
+                                        placeholder="0.00"
+                                    />
+                                </div>
+                            </div>
+                            {calculatedBuyAvg && (
+                                <div className="mt-2 p-2 bg-muted rounded text-sm">
+                                    <span className="text-muted-foreground">New Buy Avg: </span>
+                                    <span className="font-semibold">{formatCurrency(calculatedBuyAvg)}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {error && <p className="text-sm text-red-500">{error}</p>}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => onOpenChange(false)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handleApplyBuy}
+                            disabled={!calculatedBuyAvg}
+                        >
+                            Apply
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        );
+    }
+
+    // Sell average calculator
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="sm:max-w-[400px]">
+                <DialogHeader>
+                    <DialogTitle>
+                        Edit {holding.ticker} Sell Average
+                    </DialogTitle>
+                    <DialogDescription>
+                        Calculate new sell average using sell amount and price
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                            <p className="text-muted-foreground">Current Holdings:</p>
+                            <p className="font-medium">{formatCrypto(currentAmount)} {holding.ticker}</p>
+                        </div>
+                        <div>
+                            <p className="text-muted-foreground">Current Sell Avg:</p>
+                            <p className="font-medium">{holding.sellAvgPrice ? formatCurrency(holding.sellAvgPrice) : 'None'}</p>
+                        </div>
+                    </div>
+
+                    <div className="border-t pt-4">
+                        <h4 className="font-medium mb-3 flex items-center gap-2">
+                            <Calculator className="h-4 w-4" />
+                            Sell Calculator
+                        </h4>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <Label>Sell Amount</Label>
+                                <Input
+                                    type="number"
+                                    step="any"
+                                    value={sellAmount}
+                                    onChange={(e) => setSellAmount(e.target.value)}
+                                    placeholder="0.00"
+                                    autoFocus
+                                />
+                            </div>
+                            <div>
+                                <Label>Sell Price (USD)</Label>
+                                <Input
+                                    type="number"
+                                    step="any"
+                                    value={sellPrice}
+                                    onChange={(e) => setSellPrice(e.target.value)}
+                                    placeholder="0.00"
+                                />
+                            </div>
+                        </div>
+                        {calculatedSellAvg && (
+                            <div className="mt-2 p-2 bg-muted rounded text-sm">
+                                <span className="text-muted-foreground">New Sell Avg: </span>
+                                <span className="font-semibold">{formatCurrency(calculatedSellAvg)}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {error && <p className="text-sm text-red-500">{error}</p>}
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onOpenChange(false)}>
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={handleApplySell}
+                        variant="secondary"
+                        disabled={!calculatedSellAvg}
+                    >
+                        Apply
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
